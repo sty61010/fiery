@@ -1,4 +1,4 @@
-_BASE_: ["../single_timeframe.yml", "../models/centerpoint.yml"]
+_BASE_: ["../single_timeframe.yml", "../models/centerpoint_osf_2.yml"]
 # _BASE_: ["../single_timeframe.yml", "../models/pointpillar.yml"]
 
 TAG: "lss"

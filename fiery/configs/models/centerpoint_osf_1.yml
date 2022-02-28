@@ -4,10 +4,11 @@ MODEL:
   MM:
     BBOX_HEAD:
       bbox_coder:
-        out_size_factor: 2
+        out_size_factor: 1
+      in_channels: 128
       train_cfg:
-        out_size_factor: 2
+        out_size_factor: 1
       test_cfg:
-        out_size_factor: 2
+        out_size_factor: 1
     BBOX_NECK:
       upsample_strides: [1, 2, 4]

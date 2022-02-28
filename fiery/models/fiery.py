@@ -121,8 +121,8 @@ class Fiery(nn.Module):
                 predict_future_flow=self.cfg.INSTANCE_FLOW.ENABLED,
             )
 
-        self.detection_backbone = build_backbone(self.cfg.MODEL.MM.BBOX_BACKBONE)
-        self.detection_neck = build_neck(self.cfg.MODEL.MM.BBOX_NECK)
+        # self.detection_backbone = build_backbone(self.cfg.MODEL.MM.BBOX_BACKBONE)
+        # self.detection_neck = build_neck(self.cfg.MODEL.MM.BBOX_NECK)
         self.detection_head = build_head(self.cfg.MODEL.MM.BBOX_HEAD)
 
         set_bn_momentum(self, self.cfg.MODEL.BN_MOMENTUM)
@@ -224,9 +224,9 @@ class Fiery(nn.Module):
             if self.cfg.MODEL.MM.SEG_CAT_BACKBONE:
                 detection_input = torch.cat([detection_input, bev_output['decoded_bev']], dim=-3)
 
-        detection_backbone_output = self.detection_backbone(detection_input)
-        detection_neck_output = self.detection_neck(detection_backbone_output)
-        detection_output = self.detection_head(detection_neck_output)
+        # detection_backbone_output = self.detection_backbone(detection_input)
+        # detection_neck_output = self.detection_neck(detection_backbone_output)
+        detection_output = self.detection_head([detection_input])
         # print([[d.keys() for d in ld] for ld in detection_output])
         output = {'detection_output': detection_output, **output, **bev_output}
 
