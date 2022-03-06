@@ -1,5 +1,9 @@
+import numpy as np
 import torch
 import torch.nn as nn
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 # import random
 
 from fiery.models.encoder import Encoder
@@ -7,11 +11,15 @@ from fiery.models.temporal_model import TemporalModelIdentity, TemporalModel
 from fiery.models.distributions import DistributionModule
 from fiery.models.future_prediction import FuturePrediction
 from fiery.models.decoder import Decoder
+from fiery.models.voxel_self_attention import VoxelSelfAttention
 from fiery.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum
 from fiery.utils.geometry import cumulative_warp_features, calculate_birds_eye_view_parameters, VoxelsSumming
 from fiery.models.head_wrappers.CenterHeadWrapper import CenterHeadWrapper
 from fiery.models.head_wrappers.Anchor3DHeadWrapper import Anchor3DHeadWrapper
 from mmdet3d.models import build_head, build_backbone, build_neck
+
+sns.set_theme()
+plt.rcParams["figure.figsize"] = (12, 8)
 
 
 class Fiery(nn.Module):
@@ -51,7 +59,8 @@ class Fiery(nn.Module):
 
         # Encoder
         self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels)
-
+        self.bev_conv = nn.Conv2d(self.cfg.IMAGE.N_CAMERA * self.cfg.MODEL.ENCODER.OUT_CHANNELS, self.cfg.MODEL.ENCODER.OUT_CHANNELS, kernel_size=1)
+        # self.voxel_attention = VoxelSelfAttention(dim=self.cfg.MODEL.ENCODER.OUT_CHANNELS)
         # Temporal model
         temporal_in_channels = self.encoder_out_channels
         if self.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE:
@@ -273,19 +282,20 @@ class Fiery(nn.Module):
     def projection_to_birds_eye_view(self, x, geometry):
         """ Adapted from https://github.com/nv-tlabs/lift-splat-shoot/blob/master/src/models.py#L200"""
         # batch, n_cameras, depth, height, width, channels
-        batch, n, d, h, w, c = x.shape
+        batch, num_cameras, d, h, w, c = x.shape
         output = torch.zeros(
-            (batch, c, self.bev_dimension[0], self.bev_dimension[1]), dtype=torch.float, device=x.device
+            (batch, num_cameras * c, self.bev_dimension[0], self.bev_dimension[1]), dtype=torch.float, device=x.device
         )
         # centers = torch.zeros(
         #     (batch, c, self.bev_dimension[0] - 1, self.bev_dimension[1] - 1), dtype=torch.float, device=x.device
         # )
         # print("geometry.shape: ", geometry.shape)
         # Number of 3D points
-        N = n * d * h * w
+        N = d * h * w
+        num_bev_voxels = self.bev_dimension[0] * self.bev_dimension[1] * self.bev_dimension[2]
         for b in range(batch):
             # flatten x
-            x_b = x[b].reshape(N, c)
+            x_b = x[b].reshape(num_cameras * N, c)
 
             # Convert positions to integer indices
             geometry_b = ((geometry[b] - (self.bev_start_position - self.bev_resolution / 2.0)) / self.bev_resolution)
@@ -294,49 +304,57 @@ class Fiery(nn.Module):
             # print("geometry_b[0][0].shape: ", geometry_b[0][0].shape)
             # print("geometry_b: ", geometry_b[0][0])
 
-            geometry_b = geometry_b.view(N, 3).long()
+            geometry_b = geometry_b.view(num_cameras * N, 3).long()
+            camera_idx = torch.arange(num_cameras, device=geometry_b.device, dtype=torch.long).repeat_interleave(N)
 
             # print("(self.bev_start_position - self.bev_resolution / 2.0): ",
             #       (self.bev_start_position - self.bev_resolution / 2.0))
 
             # Mask out points that are outside the considered spatial extent.
             mask = (
-                (geometry_b[:, 0] >= 0)
-                & (geometry_b[:, 0] < self.bev_dimension[0])
-                & (geometry_b[:, 1] >= 0)
-                & (geometry_b[:, 1] < self.bev_dimension[1])
-                & (geometry_b[:, 2] >= 0)
-                & (geometry_b[:, 2] < self.bev_dimension[2])
+                (geometry_b[..., 0] >= 0)
+                & (geometry_b[..., 0] < self.bev_dimension[0])
+                & (geometry_b[..., 1] >= 0)
+                & (geometry_b[..., 1] < self.bev_dimension[1])
+                & (geometry_b[..., 2] >= 0)
+                & (geometry_b[..., 2] < self.bev_dimension[2])
             )
             x_b = x_b[mask]
             geometry_b = geometry_b[mask]
+            camera_idx = camera_idx[mask]
 
             # Sort tensors so that those within the same voxel are consecutives.
             ranks = (
-                geometry_b[:, 0] * (self.bev_dimension[1] * self.bev_dimension[2])
-                + geometry_b[:, 1] * (self.bev_dimension[2])
-                + geometry_b[:, 2]
+                camera_idx * num_bev_voxels
+                + geometry_b[..., 0] * (self.bev_dimension[1] * self.bev_dimension[2])
+                + geometry_b[..., 1] * (self.bev_dimension[2])
+                + geometry_b[..., 2]
             )
             ranks_indices = ranks.argsort()
             x_b, geometry_b, ranks = x_b[ranks_indices], geometry_b[ranks_indices], ranks[ranks_indices]
 
             # Project to bird's-eye view by summing voxels.
-            x_b, geometry_b = VoxelsSumming.apply(x_b, geometry_b, ranks)
+            x_b, geometry_b, ranks = VoxelsSumming.apply(x_b, geometry_b, ranks)
+            # print(f'geometry_b: {geometry_b.shape}, ranks: {ranks.shape}')
+            bev_feature = torch.zeros(
+                (self.bev_dimension[2], num_cameras, self.bev_dimension[0], self.bev_dimension[1], c),
+                device=x_b.device
+            )
 
-            bev_feature = torch.zeros((self.bev_dimension[2], self.bev_dimension[0], self.bev_dimension[1], c),
-                                      device=x_b.device)
-            bev_feature[geometry_b[:, 2], geometry_b[:, 0], geometry_b[:, 1]] = x_b
+            bev_feature[geometry_b[..., 2], ranks // num_bev_voxels, geometry_b[..., 0], geometry_b[..., 1]] = x_b
+            # heatmap = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
+            # geometry_b_np = geometry_b.detach().cpu().numpy()
+            # heatmap[geometry_b_np[:, 0], geometry_b_np[:, 1]] = count.float().detach().cpu().numpy()
+            # sns.heatmap(heatmap, cmap='magma_r')
+            # plt.savefig('heatmap.png', bbox_inches='tight')
+            # exit()
 
-            # Put channel in second position and remove z dimension
-            bev_feature = bev_feature.permute((0, 3, 1, 2))
-            bev_feature = bev_feature.squeeze(0)
-
+            # [Z, n, X, Y, C] -> [Z, n, C, X, Y]
+            bev_feature = bev_feature.permute((0, 1, 4, 2, 3))
+            # [Z, n, C, X, Y] -> [n*C, X, Y] (Z = 1)
+            bev_feature = bev_feature.flatten(0, 2)
             output[b] = bev_feature
-            # centers[b] = (bev_feature[:, 1:, 1:] + bev_feature[:, :-1, :-1]) / 2.0
-            # print("centers[b].shape: ", centers[b].shape)
-            # print("bev_feature.shape: ", bev_feature.shape)
-            # print("output: ", output)
-
+        output = self.bev_conv(output)
         return output
 
     def calculate_birds_eye_view_features(self, x, intrinsics, extrinsics):
