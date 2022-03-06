@@ -1,8 +1,7 @@
-import numpy as np
 import torch
 import torch.nn as nn
-import seaborn as sns
-import matplotlib.pyplot as plt
+# import seaborn as sns
+# import matplotlib.pyplot as plt
 
 # import random
 
@@ -11,15 +10,14 @@ from fiery.models.temporal_model import TemporalModelIdentity, TemporalModel
 from fiery.models.distributions import DistributionModule
 from fiery.models.future_prediction import FuturePrediction
 from fiery.models.decoder import Decoder
-from fiery.models.voxel_self_attention import VoxelSelfAttention
 from fiery.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum
 from fiery.utils.geometry import cumulative_warp_features, calculate_birds_eye_view_parameters, VoxelsSumming
 from fiery.models.head_wrappers.CenterHeadWrapper import CenterHeadWrapper
 from fiery.models.head_wrappers.Anchor3DHeadWrapper import Anchor3DHeadWrapper
 from mmdet3d.models import build_head, build_backbone, build_neck
 
-sns.set_theme()
-plt.rcParams["figure.figsize"] = (12, 8)
+# sns.set_theme()
+# plt.rcParams["figure.figsize"] = (12, 8)
 
 
 class Fiery(nn.Module):
