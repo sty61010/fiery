@@ -58,7 +58,7 @@ class Fiery(nn.Module):
         # Encoder
         self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels)
         self.bev_conv = nn.Conv2d(self.cfg.IMAGE.N_CAMERA * self.cfg.MODEL.ENCODER.OUT_CHANNELS, self.cfg.MODEL.ENCODER.OUT_CHANNELS, kernel_size=1)
-        # self.voxel_attention = VoxelSelfAttention(dim=self.cfg.MODEL.ENCODER.OUT_CHANNELS)
+        # self.bev_attention = BEVSelfAttention(dim=self.cfg.MODEL.ENCODER.OUT_CHANNELS)
         # Temporal model
         temporal_in_channels = self.encoder_out_channels
         if self.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE:
