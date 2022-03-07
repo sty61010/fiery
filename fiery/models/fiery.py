@@ -291,67 +291,133 @@ class Fiery(nn.Module):
         # Number of 3D points
         N = d * h * w
         num_bev_voxels = self.bev_dimension[0] * self.bev_dimension[1] * self.bev_dimension[2]
-        for b in range(batch):
-            # flatten x
-            x_b = x[b].reshape(num_cameras * N, c)
+        # flatten x
+        x_b = x.flatten(1, 4)
+        print(f'x_b: {x_b.shape}')
 
-            # Convert positions to integer indices
-            geometry_b = ((geometry[b] - (self.bev_start_position - self.bev_resolution / 2.0)) / self.bev_resolution)
-            # print("geometry.shape: ", geometry.shape)
-            # print("geometry: ", geometry)
-            # print("geometry_b[0][0].shape: ", geometry_b[0][0].shape)
-            # print("geometry_b: ", geometry_b[0][0])
+        # Convert positions to integer indices
+        geometry_b = ((geometry - (self.bev_start_position - self.bev_resolution / 2.0)) / self.bev_resolution)
+        # print("geometry.shape: ", geometry.shape)
+        # print("geometry: ", geometry)
+        # print("geometry_b[0][0].shape: ", geometry_b[0][0].shape)
+        # print("geometry_b: ", geometry_b[0][0])
 
-            geometry_b = geometry_b.view(num_cameras * N, 3).long()
-            camera_idx = torch.arange(num_cameras, device=geometry_b.device, dtype=torch.long).repeat_interleave(N)
+        geometry_b = geometry_b.view(batch, num_cameras * N, 3).long()
+        batch_idx = torch.arange(batch, device=geometry_b.device, dtype=torch.long).repeat_interleave(num_cameras * N)
+        camera_idx = torch.arange(num_cameras, device=geometry_b.device, dtype=torch.long).repeat_interleave(N)
 
-            # print("(self.bev_start_position - self.bev_resolution / 2.0): ",
-            #       (self.bev_start_position - self.bev_resolution / 2.0))
+        # print("(self.bev_start_position - self.bev_resolution / 2.0): ",
+        #       (self.bev_start_position - self.bev_resolution / 2.0))
 
-            # Mask out points that are outside the considered spatial extent.
-            mask = (
-                (geometry_b[..., 0] >= 0)
-                & (geometry_b[..., 0] < self.bev_dimension[0])
-                & (geometry_b[..., 1] >= 0)
-                & (geometry_b[..., 1] < self.bev_dimension[1])
-                & (geometry_b[..., 2] >= 0)
-                & (geometry_b[..., 2] < self.bev_dimension[2])
-            )
-            x_b = x_b[mask]
-            geometry_b = geometry_b[mask]
-            camera_idx = camera_idx[mask]
+        # Mask out points that are outside the considered spatial extent.
+        mask = (
+            (geometry_b[..., 0] >= 0)
+            & (geometry_b[..., 0] < self.bev_dimension[0])
+            & (geometry_b[..., 1] >= 0)
+            & (geometry_b[..., 1] < self.bev_dimension[1])
+            & (geometry_b[..., 2] >= 0)
+            & (geometry_b[..., 2] < self.bev_dimension[2])
+        )
+        x_b = x_b[mask]
+        geometry_b = geometry_b[mask]
+        camera_idx = camera_idx[mask]
+        batch_idx = batch_idx[mask]
 
-            # Sort tensors so that those within the same voxel are consecutives.
-            ranks = (
-                camera_idx * num_bev_voxels
-                + geometry_b[..., 0] * (self.bev_dimension[1] * self.bev_dimension[2])
-                + geometry_b[..., 1] * (self.bev_dimension[2])
-                + geometry_b[..., 2]
-            )
-            ranks_indices = ranks.argsort()
-            x_b, geometry_b, ranks = x_b[ranks_indices], geometry_b[ranks_indices], ranks[ranks_indices]
+        # Sort tensors so that those within the same voxel are consecutives.
+        ranks = (
+            batch_idx * num_cameras * num_bev_voxels
+            + camera_idx * num_bev_voxels
+            + geometry_b[..., 0] * (self.bev_dimension[1] * self.bev_dimension[2])
+            + geometry_b[..., 1] * (self.bev_dimension[2])
+            + geometry_b[..., 2]
+        )
+        ranks_indices = ranks.argsort()
+        x_b, geometry_b, ranks = x_b[ranks_indices], geometry_b[ranks_indices], ranks[ranks_indices]
 
-            # Project to bird's-eye view by summing voxels.
-            x_b, geometry_b, ranks = VoxelsSumming.apply(x_b, geometry_b, ranks)
-            # print(f'geometry_b: {geometry_b.shape}, ranks: {ranks.shape}')
-            bev_feature = torch.zeros(
-                (self.bev_dimension[2], num_cameras, self.bev_dimension[0], self.bev_dimension[1], c),
-                device=x_b.device
-            )
+        # Project to bird's-eye view by summing voxels.
+        x_b, geometry_b, ranks = VoxelsSumming.apply(x_b, geometry_b, ranks)
+        # print(f'geometry_b: {geometry_b.shape}, ranks: {ranks.shape}')
+        bev_feature = torch.zeros(
+            (batch, num_cameras, self.bev_dimension[0], self.bev_dimension[1], c),
+            device=x_b.device
+        )
+        assert (ranks // ((num_cameras * num_bev_voxels) < batch) & (ranks >= 0))
+        assert ((ranks // num_bev_voxels % num_cameras < batch) & (ranks >= 0))
+        bev_feature[ranks // (num_cameras * num_bev_voxels), ranks // num_bev_voxels % num_cameras, geometry_b[..., 0], geometry_b[..., 1]] = x_b
+        # heatmap = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
+        # geometry_b_np = geometry_b.detach().cpu().numpy()
+        # heatmap[geometry_b_np[:, 0], geometry_b_np[:, 1]] = count.float().detach().cpu().numpy()
+        # sns.heatmap(heatmap, cmap='magma_r')
+        # plt.savefig('heatmap.png', bbox_inches='tight')
+        # exit()
 
-            bev_feature[geometry_b[..., 2], ranks // num_bev_voxels, geometry_b[..., 0], geometry_b[..., 1]] = x_b
-            # heatmap = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
-            # geometry_b_np = geometry_b.detach().cpu().numpy()
-            # heatmap[geometry_b_np[:, 0], geometry_b_np[:, 1]] = count.float().detach().cpu().numpy()
-            # sns.heatmap(heatmap, cmap='magma_r')
-            # plt.savefig('heatmap.png', bbox_inches='tight')
-            # exit()
+        # [B, n, X, Y, C] -> [B, n, C, X, Y]
+        bev_feature = bev_feature.permute((0, 1, 4, 2, 3))
+        # [B, n, C, X, Y] -> [B, n*C, X, Y]
+        bev_feature = bev_feature.flatten(1, 2)
+        output = bev_feature
 
-            # [Z, n, X, Y, C] -> [Z, n, C, X, Y]
-            bev_feature = bev_feature.permute((0, 1, 4, 2, 3))
-            # [Z, n, C, X, Y] -> [n*C, X, Y] (Z = 1)
-            bev_feature = bev_feature.flatten(0, 2)
-            output[b] = bev_feature
+        # for b in range(batch):
+        #     # flatten x
+        #     x_b = x[b].reshape(num_cameras * N, c)
+
+        #     # Convert positions to integer indices
+        #     geometry_b = ((geometry[b] - (self.bev_start_position - self.bev_resolution / 2.0)) / self.bev_resolution)
+        #     # print("geometry.shape: ", geometry.shape)
+        #     # print("geometry: ", geometry)
+        #     # print("geometry_b[0][0].shape: ", geometry_b[0][0].shape)
+        #     # print("geometry_b: ", geometry_b[0][0])
+
+        #     geometry_b = geometry_b.view(num_cameras * N, 3).long()
+        #     camera_idx = torch.arange(num_cameras, device=geometry_b.device, dtype=torch.long).repeat_interleave(N)
+
+        #     # print("(self.bev_start_position - self.bev_resolution / 2.0): ",
+        #     #       (self.bev_start_position - self.bev_resolution / 2.0))
+
+        #     # Mask out points that are outside the considered spatial extent.
+        #     mask = (
+        #         (geometry_b[..., 0] >= 0)
+        #         & (geometry_b[..., 0] < self.bev_dimension[0])
+        #         & (geometry_b[..., 1] >= 0)
+        #         & (geometry_b[..., 1] < self.bev_dimension[1])
+        #         & (geometry_b[..., 2] >= 0)
+        #         & (geometry_b[..., 2] < self.bev_dimension[2])
+        #     )
+        #     x_b = x_b[mask]
+        #     geometry_b = geometry_b[mask]
+        #     camera_idx = camera_idx[mask]
+
+        #     # Sort tensors so that those within the same voxel are consecutives.
+        #     ranks = (
+        #         camera_idx * num_bev_voxels
+        #         + geometry_b[..., 0] * (self.bev_dimension[1] * self.bev_dimension[2])
+        #         + geometry_b[..., 1] * (self.bev_dimension[2])
+        #         + geometry_b[..., 2]
+        #     )
+        #     ranks_indices = ranks.argsort()
+        #     x_b, geometry_b, ranks = x_b[ranks_indices], geometry_b[ranks_indices], ranks[ranks_indices]
+
+        #     # Project to bird's-eye view by summing voxels.
+        #     x_b, geometry_b, ranks = VoxelsSumming.apply(x_b, geometry_b, ranks)
+        #     # print(f'geometry_b: {geometry_b.shape}, ranks: {ranks.shape}')
+        #     bev_feature = torch.zeros(
+        #         (self.bev_dimension[2], num_cameras, self.bev_dimension[0], self.bev_dimension[1], c),
+        #         device=x_b.device
+        #     )
+
+        #     bev_feature[geometry_b[..., 2], ranks // num_bev_voxels, geometry_b[..., 0], geometry_b[..., 1]] = x_b
+        #     # heatmap = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
+        #     # geometry_b_np = geometry_b.detach().cpu().numpy()
+        #     # heatmap[geometry_b_np[:, 0], geometry_b_np[:, 1]] = count.float().detach().cpu().numpy()
+        #     # sns.heatmap(heatmap, cmap='magma_r')
+        #     # plt.savefig('heatmap.png', bbox_inches='tight')
+        #     # exit()
+
+        #     # [Z, n, X, Y, C] -> [Z, n, C, X, Y]
+        #     bev_feature = bev_feature.permute((0, 1, 4, 2, 3))
+        #     # [Z, n, C, X, Y] -> [n*C, X, Y] (Z = 1)
+        #     bev_feature = bev_feature.flatten(0, 2)
+        #     output[b] = bev_feature
         output = self.bev_conv(output)
         return output
 
