@@ -1,4 +1,4 @@
-name: bev
+name: fiery
 channels:
   - pytorch
   - conda-forge
@@ -108,7 +108,6 @@ dependencies:
   - werkzeug=2.0.2=pyhd3eb1b0_0
   - wheel=0.37.1=pyhd3eb1b0_0
   - xz=5.2.5=h7b6447c_0
-  - yacs=0.1.6=pyhd3eb1b0_1
   - yaml=0.2.5=h7b6447c_0
   - yarl=1.6.3=py37h27cfd23_0
   - zipp=3.7.0=pyhd3eb1b0_0
@@ -226,5 +225,6 @@ dependencies:
     - wcwidth==0.2.5
     - webencodings==0.5.1
     - widgetsnbextension==3.5.2
+    - yacs=0.1.8
     - yapf==0.32.0
 prefix: /home/master/10/andy94077s/miniconda3/envs/fiery
