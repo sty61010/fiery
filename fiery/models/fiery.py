@@ -5,7 +5,7 @@ import torch.nn as nn
 
 # import random
 
-from fiery.models.encoder import Encoder
+from fiery.models.encoder import Encoder, ImageAttention
 from fiery.models.temporal_model import TemporalModelIdentity, TemporalModel
 from fiery.models.distributions import DistributionModule
 from fiery.models.future_prediction import FuturePrediction
@@ -56,8 +56,10 @@ class Fiery(nn.Module):
         self.spatial_extent = (self.cfg.LIFT.X_BOUND[1], self.cfg.LIFT.Y_BOUND[1])
         self.bev_size = (self.bev_dimension[0].item(), self.bev_dimension[1].item())
 
+        image_attention = ImageAttention(self.cfg.IMAGE.N_CAMERA, self.cfg.IMAGE.FINAL_DIM[0] // (self.cfg.MODEL.ENCODER.DOWNSAMPLE) * self.cfg.MODEL.ENCODER.OUT_CHANNELS)
+
         # Encoder
-        self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels)
+        self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels, image_downstream_model=image_attention)
         # self.bev_conv = nn.Conv2d(self.cfg.IMAGE.N_CAMERA * self.cfg.MODEL.ENCODER.OUT_CHANNELS, self.cfg.MODEL.ENCODER.OUT_CHANNELS, kernel_size=1)
         self.bev_attention = BEVSelfAttention(num_cameras=self.cfg.IMAGE.N_CAMERA, dim=self.cfg.MODEL.ENCODER.OUT_CHANNELS)
         # Temporal model
