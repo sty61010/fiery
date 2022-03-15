@@ -111,10 +111,11 @@ class Encoder(nn.Module):
 
 
 class ImageAttention(nn.Module):
-    def __init__(self, num_cameras, dim):
+    def __init__(self, num_cameras, dim, num_layers=3):
         super().__init__()
         self.num_cameras = num_cameras
-        self.model = MultiHeadSelfAttention(dim=dim)
+        layers = [MultiHeadSelfAttention(dim=dim) for _ in range(num_layers)]
+        self.model = nn.Sequential(*layers)
 
     def forward(self, x):
         """
