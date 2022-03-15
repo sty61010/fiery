@@ -5,17 +5,17 @@ import torch.nn as nn
 
 # import random
 
-from fiery.models.encoder import Encoder, ImageAttention
+from fiery.models.encoder import Encoder
 from fiery.models.temporal_model import TemporalModelIdentity, TemporalModel
 from fiery.models.distributions import DistributionModule
 from fiery.models.future_prediction import FuturePrediction
 from fiery.models.decoder import Decoder
 from fiery.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum
 from fiery.utils.geometry import cumulative_warp_features, calculate_birds_eye_view_parameters, VoxelsSumming
-from fiery.layers.bev_self_attention import BEVSelfAttention
-from fiery.models.head_wrappers.CenterHeadWrapper import CenterHeadWrapper
-from fiery.models.head_wrappers.Anchor3DHeadWrapper import Anchor3DHeadWrapper
+
 from mmdet3d.models import build_head, build_backbone, build_neck
+
+from fiery.models import build_obj
 
 # sns.set_theme()
 # plt.rcParams["figure.figsize"] = (12, 8)
@@ -56,12 +56,19 @@ class Fiery(nn.Module):
         self.spatial_extent = (self.cfg.LIFT.X_BOUND[1], self.cfg.LIFT.Y_BOUND[1])
         self.bev_size = (self.bev_dimension[0].item(), self.bev_dimension[1].item())
 
-        image_attention = ImageAttention(self.cfg.IMAGE.N_CAMERA, self.cfg.IMAGE.FINAL_DIM[0] // (self.cfg.MODEL.ENCODER.DOWNSAMPLE) * self.cfg.MODEL.ENCODER.OUT_CHANNELS)
+        image_attention = build_obj(self.cfg.MODEL.IMAGE_ATTENTION)
+        if image_attention is not None:
+            print(f'Using image attention: {type(image_attention).__name__}')
+        # ImageAttention(self.cfg.IMAGE.N_CAMERA, self.cfg.IMAGE.FINAL_DIM[0] // (self.cfg.MODEL.ENCODER.DOWNSAMPLE) * self.cfg.MODEL.ENCODER.OUT_CHANNELS)
 
         # Encoder
         self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels, image_downstream_model=image_attention)
         # self.bev_conv = nn.Conv2d(self.cfg.IMAGE.N_CAMERA * self.cfg.MODEL.ENCODER.OUT_CHANNELS, self.cfg.MODEL.ENCODER.OUT_CHANNELS, kernel_size=1)
-        self.bev_attention = BEVSelfAttention(num_cameras=self.cfg.IMAGE.N_CAMERA, dim=self.cfg.MODEL.ENCODER.OUT_CHANNELS)
+
+        self.bev_attention = build_obj(self.cfg.MODEL.BEV_ATTENTION)
+        if self.bev_attention is not None:
+            print(f'Using bev attention: {type(self.bev_attention).__name__}')
+        # self.bev_attention = BEVSelfAttention(num_cameras=self.cfg.IMAGE.N_CAMERA, dim=self.cfg.MODEL.ENCODER.OUT_CHANNELS)
         # Temporal model
         temporal_in_channels = self.encoder_out_channels
         if self.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE:
@@ -345,8 +352,10 @@ class Fiery(nn.Module):
 
         output = bev_feature
 
-        output = self.bev_attention(output)
-        # output = self.bev_conv(output)
+        if self.bev_attention is None:
+            output = output.sum(1).permute(0, 3, 1, 2).contiguous()
+        else:
+            output = self.bev_attention(output)
         return output
 
     def calculate_birds_eye_view_features(self, x, intrinsics, extrinsics):
