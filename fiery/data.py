@@ -95,8 +95,10 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
         if self.is_lyft:
             self.dataroot = self.nusc.data_path
+            self.depth_dir = None
         else:
             self.dataroot = self.nusc.dataroot
+            self.depth_dir = os.path.join(self.cfg.DATASET.DATAROOT, 'depth')
 
         self.mode = 'train' if self.is_train else 'val'
 
@@ -230,6 +232,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         images = []
         intrinsics = []
         extrinsics = []
+        depth_maps = []
         cameras = self.cfg.IMAGE.NAMES
         n_camera = self.cfg.IMAGE.N_CAMERA
         # The extrinsics we want are from the camera sensor to "flat egopose" as defined
@@ -250,7 +253,15 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         cams = random.sample(cameras, n_camera)
         # print("cams: ", cams)
         for cam in cams:
-            camera_sample = self.nusc.get('sample_data', rec['data'][cam])
+            camera_token = rec['data'][cam]
+            camera_sample = self.nusc.get('sample_data', camera_token)
+
+            depth_map_path = os.path.join(self.depth_dir, f'{camera_token}.npy')
+            if os.path.exists(depth_map_path):
+                depth_map = np.load(depth_map_path)
+            else:
+                depth_size = (int(self.cfg.IMAGE.FINAL_DIM[0] // self.cfg.MODEL.ENCODER.DOWNSAMPLE), int(self.cfg.IMAGE.FINAL_DIM[1] // self.cfg.MODEL.ENCODER.DOWNSAMPLE))
+                depth_map = torch.zeros(depth_size)
 
             # Transformation from world to egopose
             car_egopose = self.nusc.get('ego_pose', camera_sample['ego_pose_token'])
@@ -299,13 +310,16 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             images.append(normalised_img.unsqueeze(0).unsqueeze(0))
             intrinsics.append(intrinsic.unsqueeze(0).unsqueeze(0))
             extrinsics.append(sensor_to_lidar.unsqueeze(0).unsqueeze(0))
+            depth_maps.append(depth_map.unsqueeze(0).unsqueeze(0))
 
-        images, intrinsics, extrinsics = (torch.cat(images, dim=1),
-                                          torch.cat(intrinsics, dim=1),
-                                          torch.cat(extrinsics, dim=1)
-                                          )
+        images, intrinsics, extrinsics, depth_maps = (
+            torch.cat(images, dim=1),
+            torch.cat(intrinsics, dim=1),
+            torch.cat(extrinsics, dim=1),
+            torch.cat(depth_maps, dim=1)
+        )
 
-        return images, intrinsics, extrinsics
+        return images, intrinsics, extrinsics, depth_maps
 
     def _get_top_lidar_pose(self, rec):
         egopose = self.nusc.get('ego_pose',
@@ -551,7 +565,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         for i in range(1):
             rec = self.ixes[index]
 
-            images, intrinsics, extrinsics = self.get_input_data(rec)
+            images, intrinsics, extrinsics, depth_map = self.get_input_data(rec)
             segmentation, instance, z_position, instance_map, attribute_label, anns_results = \
                 self.get_label(rec, instance_map)
 
@@ -566,6 +580,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             data['image'].append(images)
             data['intrinsics'].append(intrinsics)
             data['extrinsics'].append(extrinsics)
+            data['depth_map'].append(depth_map)
 
             data['segmentation'].append(segmentation)
             data['instance'].append(instance)
