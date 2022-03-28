@@ -1,3 +1,4 @@
+from typing import List, Union
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.dense_heads import CenterHead
 import torch
@@ -96,5 +97,5 @@ class CenterHeadWrapper(CenterHead):
             preds_heatmaps[f'task_{task_id}.heatmap'] = pred_heatmaps
         return preds_heatmaps, gt_heatmaps
 
-    def get_additional_tags(self) -> str:
+    def get_additional_tags(self) -> Union[str, List[str]]:
         return f'osf_{self.out_size_factor}'

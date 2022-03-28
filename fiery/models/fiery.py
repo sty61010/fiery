@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+# import seaborn as sns
+# import matplotlib.pyplot as plt
+
 # import random
 
 from fiery.models.encoder import Encoder
@@ -9,9 +12,13 @@ from fiery.models.future_prediction import FuturePrediction
 from fiery.models.decoder import Decoder
 from fiery.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum
 from fiery.utils.geometry import cumulative_warp_features, calculate_birds_eye_view_parameters, VoxelsSumming
-from fiery.models.head_wrappers.CenterHeadWrapper import CenterHeadWrapper
-from fiery.models.head_wrappers.Anchor3DHeadWrapper import Anchor3DHeadWrapper
+
 from mmdet3d.models import build_head, build_backbone, build_neck
+
+from fiery.models import build_obj
+
+# sns.set_theme()
+# plt.rcParams["figure.figsize"] = (12, 8)
 
 
 class Fiery(nn.Module):
@@ -49,9 +56,19 @@ class Fiery(nn.Module):
         self.spatial_extent = (self.cfg.LIFT.X_BOUND[1], self.cfg.LIFT.Y_BOUND[1])
         self.bev_size = (self.bev_dimension[0].item(), self.bev_dimension[1].item())
 
-        # Encoder
-        self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels)
+        image_attention = build_obj(self.cfg.MODEL.IMAGE_ATTENTION)
+        if image_attention is not None:
+            print(f'Using image attention: {type(image_attention).__name__}')
+        # ImageAttention(self.cfg.IMAGE.N_CAMERA, self.cfg.IMAGE.FINAL_DIM[0] // (self.cfg.MODEL.ENCODER.DOWNSAMPLE) * self.cfg.MODEL.ENCODER.OUT_CHANNELS)
 
+        # Encoder
+        self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels, image_downstream_model=image_attention)
+        # self.bev_conv = nn.Conv2d(self.cfg.IMAGE.N_CAMERA * self.cfg.MODEL.ENCODER.OUT_CHANNELS, self.cfg.MODEL.ENCODER.OUT_CHANNELS, kernel_size=1)
+
+        self.bev_attention = build_obj(self.cfg.MODEL.BEV_ATTENTION)
+        if self.bev_attention is not None:
+            print(f'Using bev attention: {type(self.bev_attention).__name__}')
+        # self.bev_attention = BEVSelfAttention(num_cameras=self.cfg.IMAGE.N_CAMERA, dim=self.cfg.MODEL.ENCODER.OUT_CHANNELS)
         # Temporal model
         temporal_in_channels = self.encoder_out_channels
         if self.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE:
@@ -273,70 +290,72 @@ class Fiery(nn.Module):
     def projection_to_birds_eye_view(self, x, geometry):
         """ Adapted from https://github.com/nv-tlabs/lift-splat-shoot/blob/master/src/models.py#L200"""
         # batch, n_cameras, depth, height, width, channels
-        batch, n, d, h, w, c = x.shape
-        output = torch.zeros(
-            (batch, c, self.bev_dimension[0], self.bev_dimension[1]), dtype=torch.float, device=x.device
-        )
-        # centers = torch.zeros(
-        #     (batch, c, self.bev_dimension[0] - 1, self.bev_dimension[1] - 1), dtype=torch.float, device=x.device
-        # )
-        # print("geometry.shape: ", geometry.shape)
+        batch, num_cameras, d, h, w, c = x.shape
         # Number of 3D points
-        N = n * d * h * w
-        for b in range(batch):
-            # flatten x
-            x_b = x[b].reshape(N, c)
+        N = d * h * w
+        num_bev_voxels = self.bev_dimension[0] * self.bev_dimension[1] * self.bev_dimension[2]
+        # flatten x
+        x_b = x.flatten(0, -2)
 
-            # Convert positions to integer indices
-            geometry_b = ((geometry[b] - (self.bev_start_position - self.bev_resolution / 2.0)) / self.bev_resolution)
-            # print("geometry.shape: ", geometry.shape)
-            # print("geometry: ", geometry)
-            # print("geometry_b[0][0].shape: ", geometry_b[0][0].shape)
-            # print("geometry_b: ", geometry_b[0][0])
+        # Convert positions to integer indices
+        geometry_b = ((geometry - (self.bev_start_position - self.bev_resolution / 2.0)) / self.bev_resolution)
+        # print("geometry.shape: ", geometry.shape)
+        # print("geometry: ", geometry)
+        # print("geometry_b[0][0].shape: ", geometry_b[0][0].shape)
+        # print("geometry_b: ", geometry_b[0][0])
 
-            geometry_b = geometry_b.view(N, 3).long()
+        geometry_b = geometry_b.view(batch * num_cameras * N, 3).long()
+        batch_idx = torch.arange(batch, device=geometry_b.device, dtype=torch.long).repeat_interleave(num_cameras * N)
+        camera_idx = torch.arange(num_cameras, device=geometry_b.device, dtype=torch.long).repeat_interleave(N).tile(batch)
 
-            # print("(self.bev_start_position - self.bev_resolution / 2.0): ",
-            #       (self.bev_start_position - self.bev_resolution / 2.0))
+        # print("(self.bev_start_position - self.bev_resolution / 2.0): ",
+        #       (self.bev_start_position - self.bev_resolution / 2.0))
 
-            # Mask out points that are outside the considered spatial extent.
-            mask = (
-                (geometry_b[:, 0] >= 0)
-                & (geometry_b[:, 0] < self.bev_dimension[0])
-                & (geometry_b[:, 1] >= 0)
-                & (geometry_b[:, 1] < self.bev_dimension[1])
-                & (geometry_b[:, 2] >= 0)
-                & (geometry_b[:, 2] < self.bev_dimension[2])
-            )
-            x_b = x_b[mask]
-            geometry_b = geometry_b[mask]
+        # Mask out points that are outside the considered spatial extent.
+        mask = (
+            (geometry_b[..., 0] >= 0)
+            & (geometry_b[..., 0] < self.bev_dimension[0])
+            & (geometry_b[..., 1] >= 0)
+            & (geometry_b[..., 1] < self.bev_dimension[1])
+            & (geometry_b[..., 2] >= 0)
+            & (geometry_b[..., 2] < self.bev_dimension[2])
+        )
+        x_b = x_b[mask]
+        geometry_b = geometry_b[mask]
+        camera_idx = camera_idx[mask]
+        batch_idx = batch_idx[mask]
 
-            # Sort tensors so that those within the same voxel are consecutives.
-            ranks = (
-                geometry_b[:, 0] * (self.bev_dimension[1] * self.bev_dimension[2])
-                + geometry_b[:, 1] * (self.bev_dimension[2])
-                + geometry_b[:, 2]
-            )
-            ranks_indices = ranks.argsort()
-            x_b, geometry_b, ranks = x_b[ranks_indices], geometry_b[ranks_indices], ranks[ranks_indices]
+        # Sort tensors so that those within the same voxel are consecutives.
+        ranks = (
+            batch_idx * num_cameras * num_bev_voxels
+            + camera_idx * num_bev_voxels
+            + geometry_b[..., 0] * (self.bev_dimension[1] * self.bev_dimension[2])
+            + geometry_b[..., 1] * (self.bev_dimension[2])
+            + geometry_b[..., 2]
+        )
+        ranks_indices = ranks.argsort()
+        x_b, geometry_b, ranks = x_b[ranks_indices], geometry_b[ranks_indices], ranks[ranks_indices]
 
-            # Project to bird's-eye view by summing voxels.
-            x_b, geometry_b = VoxelsSumming.apply(x_b, geometry_b, ranks)
+        # Project to bird's-eye view by summing voxels.
+        x_b, geometry_b, ranks = VoxelsSumming.apply(x_b, geometry_b, ranks)
+        bev_feature = torch.zeros(
+            (batch, num_cameras, self.bev_dimension[0], self.bev_dimension[1], c),
+            device=x_b.device
+        )
+        bev_feature[ranks // (num_cameras * num_bev_voxels), ranks // num_bev_voxels % num_cameras, geometry_b[..., 0], geometry_b[..., 1]] = x_b
+        # heatmap = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
+        # geometry_b_np = geometry_b.detach().cpu().numpy()
+        # heatmap[geometry_b_np[:, 0], geometry_b_np[:, 1]] = count.float().detach().cpu().numpy()
+        # sns.heatmap(heatmap, cmap='magma_r')
+        # plt.savefig('heatmap.png', bbox_inches='tight')
+        # exit()
 
-            bev_feature = torch.zeros((self.bev_dimension[2], self.bev_dimension[0], self.bev_dimension[1], c),
-                                      device=x_b.device)
-            bev_feature[geometry_b[:, 2], geometry_b[:, 0], geometry_b[:, 1]] = x_b
+        output = bev_feature
 
-            # Put channel in second position and remove z dimension
-            bev_feature = bev_feature.permute((0, 3, 1, 2))
-            bev_feature = bev_feature.squeeze(0)
-
-            output[b] = bev_feature
-            # centers[b] = (bev_feature[:, 1:, 1:] + bev_feature[:, :-1, :-1]) / 2.0
-            # print("centers[b].shape: ", centers[b].shape)
-            # print("bev_feature.shape: ", bev_feature.shape)
-            # print("output: ", output)
-
+        if self.bev_attention is None:
+            output = output.sum(1).permute(0, 3, 1, 2).contiguous()
+        else:
+            output = self.bev_attention(output)
         return output
 
     def calculate_birds_eye_view_features(self, x, intrinsics, extrinsics):

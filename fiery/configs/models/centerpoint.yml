@@ -6,11 +6,11 @@ MODEL:
   MM:
     BBOX_BACKBONE:
       norm_cfg:
-        type: 'BN'
+        type: "BN"
         eps: 0.001
         momentum: 0.01
       conv_cfg:
-        type: 'Conv2d'
+        type: "Conv2d"
         bias: False
       in_channels: 64
       # out_channels: [128, 256, 512]

@@ -1,0 +1,5 @@
+MODEL:
+  BEV_ATTENTION:
+    type: BEVAttention
+    num_cameras: 6
+    dim: 64
