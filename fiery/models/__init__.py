@@ -1,5 +1,6 @@
 from importlib import import_module
 
+from torch.nn import CrossEntropyLoss
 from self_attention_cv.bottleneck_transformer import BottleneckModule
 
 from fiery.layers.bev_self_attention import BEVSelfAttention
@@ -35,5 +36,6 @@ __all__ = [
     'BottleneckModule',
     'BEVSelfAttention',
     'CenterHeadWrapper',
+    'CrossEntropyLoss',
     'ImageAttention',
 ]

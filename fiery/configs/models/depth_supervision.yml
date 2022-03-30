@@ -1,0 +1,4 @@
+LOSS:
+  DEPTH_SUPERVISION:
+    type: CrossEntropyLoss
+    ignore_index: 0

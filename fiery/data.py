@@ -1,3 +1,4 @@
+import logging
 import os
 from PIL import Image
 
@@ -98,7 +99,8 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             self.depth_dir = None
         else:
             self.dataroot = self.nusc.dataroot
-            self.depth_dir = os.path.join(self.cfg.DATASET.DATAROOT, 'depth')
+            self.depth_dir = os.path.join(self.nusc.dataroot, 'depth_maps')
+            logging.info(f'depth_dir: {self.depth_dir}')
 
         self.mode = 'train' if self.is_train else 'val'
 
@@ -257,11 +259,19 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             camera_sample = self.nusc.get('sample_data', camera_token)
 
             depth_map_path = os.path.join(self.depth_dir, f'{camera_token}.npy')
-            if os.path.exists(depth_map_path):
+            depth_size = (int(self.cfg.IMAGE.FINAL_DIM[0] // self.cfg.MODEL.ENCODER.DOWNSAMPLE), int(self.cfg.IMAGE.FINAL_DIM[1] // self.cfg.MODEL.ENCODER.DOWNSAMPLE))
+            if self.cfg.LOSS.DEPTH_SUPERVISION and os.path.exists(depth_map_path):
                 depth_map = np.load(depth_map_path)
+                # The size of cv2 is (width, height)
+                depth_map = cv2.resize(depth_map, depth_size[::-1], interpolation=cv2.INTER_AREA)
+                depth_map = torch.from_numpy(depth_map).round().long()
+                num_depth_classes = int(np.ceil((self.cfg.LIFT.D_BOUND[1] - self.cfg.LIFT.D_BOUND[0]) // self.cfg.LIFT.D_BOUND[2]))
+                depth_map = ((depth_map - self.cfg.LIFT.D_BOUND[0]) // self.cfg.LIFT.D_BOUND[2]).long() + 1
+                # filter depths that are too far
+                depth_map[(depth_map < 1) | (depth_map > num_depth_classes)] = 0
+                # logging.info(f'loaded, {depth_map.shape}')
             else:
-                depth_size = (int(self.cfg.IMAGE.FINAL_DIM[0] // self.cfg.MODEL.ENCODER.DOWNSAMPLE), int(self.cfg.IMAGE.FINAL_DIM[1] // self.cfg.MODEL.ENCODER.DOWNSAMPLE))
-                depth_map = torch.zeros(depth_size)
+                depth_map = torch.zeros(depth_size, dtype=torch.long)
 
             # Transformation from world to egopose
             car_egopose = self.nusc.get('ego_pose', camera_sample['ego_pose_token'])
@@ -549,7 +559,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
         """
         data = {}
-        keys = ['image', 'intrinsics', 'extrinsics',
+        keys = ['image', 'intrinsics', 'extrinsics', 'depth_map',
                 'segmentation', 'instance', 'centerness', 'offset', 'flow', 'future_egomotion',
                 'sample_token',
                 'z_position', 'attribute',

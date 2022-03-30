@@ -1,3 +1,4 @@
+import logging
 import torch
 import torch.nn as nn
 # import seaborn as sns
@@ -38,6 +39,8 @@ class Fiery(nn.Module):
 
         self.frustum = self.create_frustum()
         self.depth_channels, _, _, _ = self.frustum.shape
+        num_depth_classes = (self.cfg.LIFT.D_BOUND[1] - self.cfg.LIFT.D_BOUND[0]) // self.cfg.LIFT.D_BOUND[2]
+        logging.log(f'self.depth_channels: {self.depth_channels}, num_depth_classes: {num_depth_classes}')
 
         if self.cfg.TIME_RECEPTIVE_FIELD == 1:
             assert self.cfg.MODEL.TEMPORAL_MODEL.NAME == 'identity'
@@ -176,7 +179,8 @@ class Fiery(nn.Module):
         future_egomotion = future_egomotion[:, :self.receptive_field].contiguous()
 
         # Lifting features and project to bird's-eye view
-        x = self.calculate_birds_eye_view_features(image, intrinsics, extrinsics)
+        encoder_output = self.calculate_birds_eye_view_features(image, intrinsics, extrinsics)
+        x = encoder_output.get('frustum')
 
         # Warp past features to the present's reference frame
         x = cumulative_warp_features(
@@ -247,6 +251,10 @@ class Fiery(nn.Module):
         # print([[d.keys() for d in ld] for ld in detection_output])
         output = {'detection_output': detection_output, **output, **bev_output}
 
+        if self.cfg.LOSS.DEPTH_SUPERVISION is not None:
+            assert 'depth_map' not in output, "key name collision: 'depth_map'"
+            output['depth_map'] = encoder_output.get('depth_map')
+
         return output
 
     def get_geometry(self, intrinsics, extrinsics):
@@ -278,14 +286,16 @@ class Fiery(nn.Module):
         b, n, c, h, w = x.shape
 
         x = x.view(b * n, c, h, w)
-        x = self.encoder(x)
+        encoder_output = self.encoder(x)
+        x = encoder_output.get('frustum')
         # print("x.shape: ", x.shape)
 
         x = x.view(b, n, *x.shape[1:])
         x = x.permute(0, 1, 3, 4, 5, 2)
         # print("x.shape: ", x.shape)
 
-        return x
+        encoder_output.update(dict(frustum=x))
+        return encoder_output
 
     def projection_to_birds_eye_view(self, x, geometry):
         """ Adapted from https://github.com/nv-tlabs/lift-splat-shoot/blob/master/src/models.py#L200"""
@@ -366,10 +376,12 @@ class Fiery(nn.Module):
         extrinsics = pack_sequence_dim(extrinsics)
 
         geometry = self.get_geometry(intrinsics, extrinsics)
-        x = self.encoder_forward(x)
+        encoder_output = self.encoder_forward(x)
+        x = encoder_output.get('frustum')
         x = self.projection_to_birds_eye_view(x, geometry)
         x = unpack_sequence_dim(x, b, s)
-        return x
+        encoder_output.update(dict(frustum=x))
+        return encoder_output
 
     def distribution_forward(self, present_features, future_distribution_inputs=None, noise=None):
         """

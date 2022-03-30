@@ -1,3 +1,4 @@
+import logging
 import os
 # import time
 # import socket
@@ -9,6 +10,8 @@ from pytorch_lightning.plugins import DDPPlugin
 from fiery.config import get_parser, get_cfg
 from fiery.data import prepare_dataloaders
 from fiery.trainer import TrainingModule
+
+logging.basicConfig(level=logging.INFO)
 
 
 def main():

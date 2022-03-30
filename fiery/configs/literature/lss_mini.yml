@@ -1,4 +1,4 @@
-_BASE_: ["../single_timeframe.yml", "../models/centerpoint.yml", "../models/image_attention.yml"]
+_BASE_: ["../single_timeframe.yml", "../models/centerpoint.yml", "../models/depth_supervision.yml"]
 # _BASE_: ["../single_timeframe.yml", "../models/pointpillar.yml"]
 
 TAG: "lss"
@@ -53,4 +53,4 @@ OBJ:
 
 MODEL:
   ENCODER:
-    DOWNSAMPLE: 16
+    DOWNSAMPLE: 8

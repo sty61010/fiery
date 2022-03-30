@@ -1,4 +1,5 @@
 from typing import Callable, Union
+import torch
 import torch.nn as nn
 from efficientnet_pytorch import EfficientNet
 from self_attention_cv import MultiHeadSelfAttention
@@ -35,7 +36,7 @@ class Encoder(nn.Module):
 
         self.upsampling_layer = UpsamplingConcat(upsampling_in_channels, upsampling_out_channels)
         if self.use_depth_distribution:
-            self.depth_layer = nn.Conv2d(upsampling_out_channels, self.C + self.D, kernel_size=1, padding=0)
+            self.depth_layer = nn.Conv2d(upsampling_out_channels, self.C + (1 + self.D), kernel_size=1, padding=0)
         else:
             self.depth_layer = nn.Conv2d(upsampling_out_channels, self.C, kernel_size=1, padding=0)
         self.image_downstream_model = image_downstream_model
@@ -99,15 +100,17 @@ class Encoder(nn.Module):
         x = self.depth_layer(x)  # feature and depth head
 
         if self.use_depth_distribution:
-            depth = x[:, : self.D].softmax(dim=1)
-            image_feature = x[:, self.D: (self.D + self.C)]
+            depth = x[:, : 1 + self.D].softmax(dim=1)
+            image_feature = x[:, 1 + self.D:]
             if self.image_downstream_model is not None:
                 image_feature = self.image_downstream_model(image_feature)
-            x = depth.unsqueeze(1) * image_feature.unsqueeze(2)  # outer product depth and features
+            x = depth[:, 1:].unsqueeze(1) * image_feature.unsqueeze(2)  # outer product depth and features
         else:
+            N, C, H, W = x.shape
+            depth = torch.full((N, 1 + self.D, H, W), 1 / self.D)
             x = x.unsqueeze(2).repeat(1, 1, self.D, 1, 1)
 
-        return x
+        return dict(frustum=x, depth_map=depth)
 
 
 class ImageAttention(nn.Module):

@@ -1,3 +1,4 @@
+import logging
 import os
 import json
 import operator
@@ -8,6 +9,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 
 from fiery.config import get_cfg
+from fiery.models import build_obj
 from fiery.models.fiery import Fiery
 from fiery.losses import ProbabilisticLoss, SpatialRegressionLoss, SegmentationLoss
 from fiery.metrics import IntersectionOverUnion, PanopticMetric
@@ -97,6 +99,10 @@ class TrainingModule(pl.LightningModule):
 
             if self.cfg.PROBABILISTIC.ENABLED:
                 self.losses_fn['probabilistic'] = ProbabilisticLoss()
+
+        self.depth_loss = build_obj(self.cfg.LOSS.DEPTH_SUPERVISION)
+        if self.depth_loss is not None:
+            logging.info(f'Using depth loss: {type(self.depth_loss).__name__}')
 
         self.training_step_count = 0
 
@@ -193,6 +199,11 @@ class TrainingModule(pl.LightningModule):
             loss = torch.stack([loss_value for loss_value in loss_dict.values()]).sum()
             loss_dict['total'] = loss
 
+        depth_loss = None
+        if self.depth_loss:
+            # print(f"output.get('depth_map'): {output.get('depth_map').shape}, batch.get('depth_map'): {batch.get('depth_map').shape}")
+            depth_loss = self.depth_loss(output.get('depth_map'), batch.get('depth_map').flatten(0, 2))
+
         #####
         # SEG Loss computation
         #####
@@ -243,7 +254,7 @@ class TrainingModule(pl.LightningModule):
                 self.metric_panoptic_val(
                     pred_consistent_instance_seg, labels['instance'])
 
-        return loss, loss_dict, output, labels, seg_loss
+        return loss, loss_dict, output, labels, seg_loss, depth_loss
 
     def visualise(self, labels, output, global_step=None, prefix='train'):
         visualisation_video = visualise_output(labels, output, self.cfg)
@@ -261,7 +272,7 @@ class TrainingModule(pl.LightningModule):
     # training_step
     #####
     def training_step(self, batch, batch_idx):
-        loss, loss_dict, output, labels, seg_loss = self.shared_step(batch, True)
+        loss, loss_dict, output, labels, seg_loss, depth_loss = self.shared_step(batch, True)
 
         if self.cfg.LOSS.SEG_USE:
             #####
@@ -275,6 +286,10 @@ class TrainingModule(pl.LightningModule):
             loss = self.cfg.LOSS.OBJ_LOSS_WEIGHT.ALL * loss + self.cfg.LOSS.SEG_LOSS_WEIGHT.ALL * sum(seg_loss.values())
         else:
             loss = (self.cfg.LOSS.OBJ_LOSS_WEIGHT.ALL + self.cfg.LOSS.SEG_LOSS_WEIGHT.ALL) * loss
+
+        if self.depth_loss:
+            loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT * depth_loss
+            self.log('train_depth_loss', depth_loss)
 
         if self.cfg.OBJ.HEAD_NAME == 'mm':
             if batch_idx == 0:
@@ -295,7 +310,7 @@ class TrainingModule(pl.LightningModule):
     # validation_step
     #####
     def validation_step(self, batch, batch_idx):
-        loss, loss_dict, output, labels, seg_loss = self.shared_step(batch, False)
+        loss, loss_dict, output, labels, seg_loss, depth_loss = self.shared_step(batch, False)
 
         if self.cfg.LOSS.SEG_USE:
             #####
@@ -308,6 +323,10 @@ class TrainingModule(pl.LightningModule):
             loss = self.cfg.LOSS.OBJ_LOSS_WEIGHT.ALL * loss + self.cfg.LOSS.SEG_LOSS_WEIGHT.ALL * sum(seg_loss.values())
         else:
             loss = (self.cfg.LOSS.OBJ_LOSS_WEIGHT.ALL + self.cfg.LOSS.SEG_LOSS_WEIGHT.ALL) * loss
+
+        if self.depth_loss:
+            loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT * depth_loss
+            self.log('val_depth_loss', depth_loss, batch_size=self.cfg.VAL_BATCHSIZE)
 
         #####
         # OBJ Loss Logger
@@ -539,7 +558,7 @@ class TrainingModule(pl.LightningModule):
     # test_step
     #####
     def test_step(self, batch, batch_idx):
-        loss, loss_dict, output, labels, seg_loss = self.shared_step(batch, False)
+        loss, loss_dict, output, labels, seg_loss, depth_loss = self.shared_step(batch, False)
 
         if self.cfg.LOSS.SEG_USE:
             #####
@@ -552,6 +571,10 @@ class TrainingModule(pl.LightningModule):
             loss = self.cfg.LOSS.OBJ_LOSS_WEIGHT.ALL * loss + self.cfg.LOSS.SEG_LOSS_WEIGHT.ALL * sum(seg_loss.values())
         else:
             loss = (self.cfg.LOSS.OBJ_LOSS_WEIGHT.ALL + self.cfg.LOSS.SEG_LOSS_WEIGHT.ALL) * loss
+
+        if self.depth_loss:
+            loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT * depth_loss
+            self.log('test_depth_loss', depth_loss, batch_size=self.cfg.VAL_BATCHSIZE)
 
         #####
         # OBJ Loss Logger
