@@ -18,7 +18,7 @@ from fiery.utils.instance import predict_instance_segmentation_and_trajectories
 from fiery.utils.visualisation import visualise_output
 
 
-from fiery.utils.nuscenes_visualization import visualize_bbox, visualize_sample, visualize_center
+from fiery.utils.nuscenes_visualization import visualize_bbox, visualize_depth_map, visualize_sample, visualize_center
 
 from fiery.utils.object_evaluation_utils import (cls_attr_dist, evaluate_json, lidar_egopose_to_world)
 from fiery.utils.mm_obj_evaluation_utils import output_to_nusc_box
@@ -103,6 +103,7 @@ class TrainingModule(pl.LightningModule):
         self.depth_loss = build_obj(self.cfg.LOSS.DEPTH_SUPERVISION)
         if self.depth_loss is not None:
             logging.info(f'Using depth loss: {type(self.depth_loss).__name__}')
+            self.visualize_depth = {}
 
         self.training_step_count = 0
 
@@ -201,7 +202,7 @@ class TrainingModule(pl.LightningModule):
 
         depth_loss = None
         if self.depth_loss:
-            # print(f"output.get('depth_map'): {output.get('depth_map').shape}, batch.get('depth_map'): {batch.get('depth_map').shape}")
+            # TODO: get time index -1 of gt_depth_map or flatten all timeframe?
             depth_loss = self.depth_loss(output.get('depth_map'), batch.get('depth_map').flatten(0, 2))
 
         #####
@@ -268,6 +269,37 @@ class TrainingModule(pl.LightningModule):
             fps=2
         )
 
+    def visualize_depth_map(self, pred_depth_maps, gt_depth_maps, global_step=None, prefix='train'):
+        """Visualize depth map of prediction and ground truth
+
+        Args:
+            pred_depth_maps: [batch * time * num_cameras, num_classes, H, W]
+            gt_depth_maps: [batch, num_frames, num_cameras, H, W]
+            global_step: The global step of the logger. None if using `self.global_step`.
+            prefix:
+        """
+        if global_step is None:
+            global_step = self.global_step
+
+        # Reshape pred_depth_maps to [batch, num_frames, num_cameras, num_classes, H, W]
+        _, num_frames, num_cameras, _, _ = gt_depth_maps.shape
+        pred_depth_maps = pred_depth_maps.view(-1, num_frames, num_cameras, *pred_depth_maps.shape[1:])
+
+        # extract the time dimension
+        gt_depth_maps = gt_depth_maps[:, -1]
+        pred_depth_maps = pred_depth_maps[:, -1]
+
+        for pred_depth_map, gt_depth_map in zip(pred_depth_maps, gt_depth_maps):
+            # skip the fake depth map
+            if not torch.all(gt_depth_map == 0):
+                self.visualize_depth[prefix] = True
+                self.logger.experiment.add_figure(
+                    f'{prefix}_depth_map',
+                    visualize_depth_map(pred_depth_map, gt_depth_map),
+                    global_step=self.global_step,
+                )
+                break
+
     #####
     # training_step
     #####
@@ -291,13 +323,15 @@ class TrainingModule(pl.LightningModule):
             loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT * depth_loss
             self.log('train_depth_loss', depth_loss)
 
-        if self.cfg.OBJ.HEAD_NAME == 'mm':
-            if batch_idx == 0:
+        if batch_idx == 0:
+            if self.cfg.OBJ.HEAD_NAME == 'mm':
                 self.mm_visualize(
                     batch,
                     output['detection_output'],
                     prefix='train'
                 )
+        if not self.visualize_depth.get('train', False):
+            self.visualize_depth_map(output.get('depth_map'), batch.get('depth_map'))
         #####
         # OBJ Loss Logger
         #####
@@ -305,6 +339,9 @@ class TrainingModule(pl.LightningModule):
             self.log(f'train_obj_loss/{key}', value)
 
         return {'loss': loss}
+
+    def on_epoch_start(self):
+        self.visualize_depth = {'train': False, 'val': False, 'test': False}
 
     #####
     # validation_step
@@ -350,6 +387,12 @@ class TrainingModule(pl.LightningModule):
                 )
             if self.cfg.EVALUATION:
                 self.mm_obj_evaluation(tokens, pred_bboxes_list)
+        if not self.visualize_depth.get('val', False):
+            self.visualize_depth_map(
+                output.get('depth_map'),
+                batch.get('depth_map'),
+                prefix='val',
+            )
 
         return output_dict
 
@@ -599,6 +642,15 @@ class TrainingModule(pl.LightningModule):
                     prefix='test'
                 )
             self.mm_obj_evaluation(tokens, pred_bboxes_list)
+
+        if batch_idx % 150 == 0 or not self.visualize_depth.get('test', False):
+            if batch_idx % 150 == 0:
+                self.visualize_depth['test'] = False
+            self.visualize_depth_map(
+                output.get('depth_map'),
+                batch.get('depth_map'),
+                prefix='test',
+            )
 
         return output_dict
 

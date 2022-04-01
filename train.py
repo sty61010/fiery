@@ -70,6 +70,9 @@ def main():
     if cfg.MODEL.MM.SEG_ADD_BACKBONE:
         save_dir_tags.append('seg_add_backbone')
 
+    if cfg.LOSS.DEPTH_SUPERVISION:
+        save_dir_tags.append('depth')
+
     if cfg.DATASET.VERSION == 'v1.0-mini':
         save_dir_tags.append('mini')
 

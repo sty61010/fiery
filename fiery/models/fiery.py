@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 import torch
 import torch.nn as nn
 # import seaborn as sns
@@ -39,8 +40,8 @@ class Fiery(nn.Module):
 
         self.frustum = self.create_frustum()
         self.depth_channels, _, _, _ = self.frustum.shape
-        num_depth_classes = (self.cfg.LIFT.D_BOUND[1] - self.cfg.LIFT.D_BOUND[0]) // self.cfg.LIFT.D_BOUND[2]
-        logging.log(f'self.depth_channels: {self.depth_channels}, num_depth_classes: {num_depth_classes}')
+        num_depth_classes = int(np.ceil((self.cfg.LIFT.D_BOUND[1] - self.cfg.LIFT.D_BOUND[0]) / self.cfg.LIFT.D_BOUND[2]))
+        logging.info(f'self.depth_channels: {self.depth_channels}, num_depth_classes: {num_depth_classes}')
 
         if self.cfg.TIME_RECEPTIVE_FIELD == 1:
             assert self.cfg.MODEL.TEMPORAL_MODEL.NAME == 'identity'

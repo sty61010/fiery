@@ -213,3 +213,22 @@ def visualize_center(pred_heatmap, gt_heatmap):
     pred_heatmap_img = heatmap_image(pred_heatmap.detach().cpu().numpy())
     heatmap_img = np.concatenate([gt_heatmap_img, pred_heatmap_img], axis=1)
     return heatmap_img
+
+
+def visualize_depth_map(pred_depth_map, gt_depth_map):
+    """Visualize depth map of prediction and ground truth
+    Args:
+        pred_depth_map: [num_cameras, num_classes, H, W]
+        gt_depth_map: [num_cameras, H, W]
+
+    Returns:
+        The depth map of prediction and ground truth. matplotlib.pyplot.Figure
+    """
+    num_cameras, _, _ = gt_depth_map.shape
+    f, ax = plt.subplots(2, num_cameras, figsize=(num_cameras * 2, 2))
+    for i, (pred_map, gt_map) in enumerate(zip(pred_depth_map, gt_depth_map)):
+        ax[0][i].imshow(gt_map.detach().cpu().numpy(), cmap='gnuplot2_r')
+        ax[1][i].imshow(pred_map.detach().cpu().argmax(dim=0).numpy(), cmap='gnuplot2_r')
+
+    f.tight_layout()
+    return f
