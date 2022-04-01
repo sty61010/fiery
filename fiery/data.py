@@ -264,9 +264,9 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
                 depth_map = np.load(depth_map_path)
                 # The size of cv2 is (width, height)
                 depth_map = cv2.resize(depth_map, depth_size[::-1], interpolation=cv2.INTER_AREA)
-                depth_map = torch.from_numpy(depth_map).round().long()
-                num_depth_classes = int(np.ceil((self.cfg.LIFT.D_BOUND[1] - self.cfg.LIFT.D_BOUND[0]) // self.cfg.LIFT.D_BOUND[2]))
-                depth_map = ((depth_map - self.cfg.LIFT.D_BOUND[0]) // self.cfg.LIFT.D_BOUND[2]).long() + 1
+                depth_map = torch.from_numpy(depth_map)
+                num_depth_classes = int(np.ceil((self.cfg.LIFT.D_BOUND[1] - self.cfg.LIFT.D_BOUND[0]) / self.cfg.LIFT.D_BOUND[2]))
+                depth_map = ((depth_map - self.cfg.LIFT.D_BOUND[0]) / self.cfg.LIFT.D_BOUND[2]).round().long() + 1
                 # filter depths that are too far
                 depth_map[(depth_map < 1) | (depth_map > num_depth_classes)] = 0
                 # logging.info(f'loaded, {depth_map.shape}')
