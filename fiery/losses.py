@@ -155,10 +155,12 @@ def focal_loss(
 
     if input.device != target.device:
         raise ValueError(f"input and target must be in the same device. Got: {input.device} and {target.device}")
+    num_unignored_points = (target != ignore_index).sum()
 
     target = target.unsqueeze(1)
     src = torch.ones_like(target, dtype=input.dtype)
     src[target == ignore_index] = 0
+    target[target == ignore_index] = 0
     target_one_hot = torch.zeros_like(input)
     target_one_hot.scatter_(dim=1, index=target, src=src)
 
@@ -175,7 +177,10 @@ def focal_loss(
     if reduction == 'none':
         loss = loss_tmp
     elif reduction == 'mean':
-        loss = torch.sum(loss_tmp) / (target != ignore_index).sum()
+        if num_unignored_points != 0:
+            loss = torch.sum(loss_tmp) / num_unignored_points
+        else:
+            loss = 0.
     elif reduction == 'sum':
         loss = torch.sum(loss_tmp)
     else:

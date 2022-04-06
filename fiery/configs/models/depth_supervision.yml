@@ -1,5 +1,8 @@
 LOSS:
   DEPTH_SUPERVISION:
-    type: CrossEntropyLoss
+    type: FocalLoss
+    # type: CrossEntropyLoss
     ignore_index: 0
-  DEPTH_SUPERVISION_WEIGHT: 0.5
+    reduction: none
+  DEPTH_SUPERVISION_WEIGHT:
+    ALL: 0.5
