@@ -26,6 +26,7 @@ from fiery.utils.mm_obj_evaluation_utils import output_to_nusc_box
 from nuscenes.nuscenes import NuScenes
 from pyquaternion.quaternion import Quaternion
 from mmdet3d.core import bbox3d2result
+from mmdet3d.models import build_loss
 
 
 class TrainingModule(pl.LightningModule):
@@ -100,7 +101,7 @@ class TrainingModule(pl.LightningModule):
             if self.cfg.PROBABILISTIC.ENABLED:
                 self.losses_fn['probabilistic'] = ProbabilisticLoss()
 
-        self.depth_loss = build_obj(self.cfg.LOSS.DEPTH_SUPERVISION)
+        self.depth_loss = build_obj(self.cfg.LOSS.DEPTH_SUPERVISION) or build_loss(self.cfg.LOSS.DEPTH_SUPERVISION)
         if self.depth_loss is not None:
             logging.info(f'Using depth loss: {type(self.depth_loss).__name__}')
             self.visualize_depth = {}
@@ -181,6 +182,7 @@ class TrainingModule(pl.LightningModule):
         intrinsics = batch['intrinsics']
         extrinsics = batch['extrinsics']
         future_egomotion = batch['future_egomotion']
+        gt_mask = batch['gt_mask']
 
         # Warp labels
         labels, future_distribution_inputs = self.prepare_future_labels(batch)
@@ -203,7 +205,14 @@ class TrainingModule(pl.LightningModule):
         depth_loss = None
         if self.depth_loss:
             # TODO: get time index -1 of gt_depth_map or flatten all timeframe?
-            depth_loss = self.depth_loss(output.get('depth_map'), batch.get('depth_map').flatten(0, 2))
+            depth_loss = self.depth_loss(output.get('depth_map'), batch.get('depth_map')[:, -1].flatten(0, 1))
+            depth_weight = torch.where(gt_mask[:, -1].flatten(0, 1), self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT.FOREGROUND, self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT.BACKGROUND)
+            depth_loss *= depth_weight
+            num_unignored_points = (batch.get('depth_map')[:, -1] != self.cfg.LOSS.DEPTH_SUPERVISION.get('ignore_index', -100)).sum()
+            if num_unignored_points != 0:
+                depth_loss = depth_loss.sum() / num_unignored_points
+            else:
+                depth_loss = 0.
 
         #####
         # SEG Loss computation
@@ -291,7 +300,8 @@ class TrainingModule(pl.LightningModule):
 
         for pred_depth_map, gt_depth_map in zip(pred_depth_maps, gt_depth_maps):
             # skip the fake depth map
-            if not torch.all(gt_depth_map == 0):
+            if not torch.all(gt_depth_map == self.cfg.LOSS.DEPTH_SUPERVISION.get('ignore_index', -100)) and \
+                    not torch.all(gt_depth_map == 0):
                 self.visualize_depth[prefix] = True
                 self.logger.experiment.add_figure(
                     f'{prefix}_depth_map',
@@ -320,7 +330,7 @@ class TrainingModule(pl.LightningModule):
             loss = (self.cfg.LOSS.OBJ_LOSS_WEIGHT.ALL + self.cfg.LOSS.SEG_LOSS_WEIGHT.ALL) * loss
 
         if self.depth_loss:
-            loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT * depth_loss
+            loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT.ALL * depth_loss
             self.log('train_depth_loss', depth_loss)
 
         if batch_idx == 0:
@@ -362,7 +372,7 @@ class TrainingModule(pl.LightningModule):
             loss = (self.cfg.LOSS.OBJ_LOSS_WEIGHT.ALL + self.cfg.LOSS.SEG_LOSS_WEIGHT.ALL) * loss
 
         if self.depth_loss:
-            loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT * depth_loss
+            loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT.ALL * depth_loss
             self.log('val_depth_loss', depth_loss, batch_size=self.cfg.VAL_BATCHSIZE)
 
         #####
@@ -616,7 +626,7 @@ class TrainingModule(pl.LightningModule):
             loss = (self.cfg.LOSS.OBJ_LOSS_WEIGHT.ALL + self.cfg.LOSS.SEG_LOSS_WEIGHT.ALL) * loss
 
         if self.depth_loss:
-            loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT * depth_loss
+            loss += self.cfg.LOSS.DEPTH_SUPERVISION_WEIGHT.ALL * depth_loss
             self.log('test_depth_loss', depth_loss, batch_size=self.cfg.VAL_BATCHSIZE)
 
         #####

@@ -1,6 +1,7 @@
 from importlib import import_module
 
 from torch.nn import CrossEntropyLoss
+from fiery.losses import FocalLoss
 from self_attention_cv.bottleneck_transformer import BottleneckModule
 
 from fiery.layers.bev_self_attention import BEVSelfAttention
@@ -14,7 +15,10 @@ def import_obj(cfg):
         return None
     classname = cfg.get('type', None) or cfg.get('NAME', None)
     if classname not in globals():
-        globals()[classname] = getattr(import_module(classname[:classname.rfind('.')]), classname.split('.')[-1])
+        try:
+            globals()[classname] = getattr(import_module(classname[:classname.rfind('.')]), classname.split('.')[-1])
+        except ModuleNotFoundError:
+            return None
     classname = globals()[classname]
     return classname
 
@@ -38,4 +42,5 @@ __all__ = [
     'CenterHeadWrapper',
     'CrossEntropyLoss',
     'ImageAttention',
+    'FocalLoss',
 ]

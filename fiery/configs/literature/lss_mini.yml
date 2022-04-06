@@ -20,7 +20,7 @@ SEMANTIC_SEG:
   NUSCENE_CLASS: False
 
 DATASET:
-  DATAROOT: "/home/master/10/cytseng/data/sets/nuscenes/"
+  DATAROOT: "/dataset/nuscenes/"
   FILTER_INVISIBLE_VEHICLES: True
   VERSION: "v1.0-mini"
   TRAINING_SAMPLES: -1

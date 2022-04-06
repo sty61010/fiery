@@ -1,6 +1,7 @@
 import logging
 import os
-from PIL import Image
+from PIL import Image, ImageDraw
+from matplotlib import pyplot as plt
 
 import numpy as np
 import cv2
@@ -11,6 +12,8 @@ from pyquaternion import Quaternion
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.splits import create_splits_scenes
 from nuscenes.utils.data_classes import Box
+from nuscenes.utils.geometry_utils import box_in_image, BoxVisibility, view_points
+
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 
 from fiery.utils.geometry import (
@@ -235,6 +238,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         intrinsics = []
         extrinsics = []
         depth_maps = []
+        gt_masks = []
         cameras = self.cfg.IMAGE.NAMES
         n_camera = self.cfg.IMAGE.N_CAMERA
         # The extrinsics we want are from the camera sensor to "flat egopose" as defined
@@ -254,6 +258,8 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         ])
         cams = random.sample(cameras, n_camera)
         # print("cams: ", cams)
+        anns = np.array(list(map(self.nusc.get_box, rec['anns'])))
+
         for cam in cams:
             camera_token = rec['data'][cam]
             camera_sample = self.nusc.get('sample_data', camera_token)
@@ -271,7 +277,12 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
                 depth_map[(depth_map < 1) | (depth_map > num_depth_classes)] = 0
                 # logging.info(f'loaded, {depth_map.shape}')
             else:
-                depth_map = torch.zeros(depth_size, dtype=torch.long)
+                # fill the invalid depth map with -1
+                depth_map = torch.full(
+                    depth_size,
+                    self.cfg.LOSS.DEPTH_SUPERVISION.get('ignore_index', -100),
+                    dtype=torch.long,
+                )
 
             # Transformation from world to egopose
             car_egopose = self.nusc.get('ego_pose', camera_sample['ego_pose_token'])
@@ -317,19 +328,81 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
                 scale_height=self.augmentation_parameters['scale_height']
             )
 
+            # # Init axes.
+            # _, ax = plt.subplots(1, 1, figsize=(9, 16))
+
+            # # Show image.
+            # ax.imshow(img)
+
+            # box_list = []
+            world_to_sensor = car_egopose_to_sensor @ world_to_car_egopose
+            box_corners = np.concatenate([box.corners() for box in anns], axis=1)
+            box_corners = view_points(box_corners, world_to_sensor, normalize=False)
+            corners = view_points(box_corners, intrinsic.numpy(), normalize=True)[:2, :]
+            box_corners = box_corners.T.reshape(-1, 8, 3)  # .transpose(2, 1, 0)
+            corners = corners.T.reshape(-1, 8, 2)  # .transpose(2, 1, 0)
+            visible = (corners[..., 0] > 0) & (corners[..., 0] < img.width) & (corners[..., 1] > 0) & (corners[..., 1] < img.height) & (box_corners[..., 2] > 1)
+            # visible = (corners[0] > 0) & (corners[0] < img.width) & (corners[1] > 0) & (corners[1] < img.height) & (box_corners[2, :] > 1)
+
+            in_front = box_corners[..., 2] > 0.1
+            # box_list = anns[np.any(visible, axis=1) & np.all(in_front, axis=1)]
+
+            corners = corners[np.any(visible, axis=1) & np.all(in_front, axis=1)]
+            corners = np.clip(corners, 0, img.size)
+            xys = np.concatenate([np.min(corners, axis=1), np.max(corners, axis=1)], axis=1)
+
+            gt_mask = np.zeros(img.size[::-1])
+            # img_with_bbox = ImageDraw.Draw(img)
+            for xy in xys:
+                gt_mask = cv2.rectangle(gt_mask, tuple(xy[:2].astype(np.int)), tuple(xy[2:].astype(np.int)), 255, -1)
+            gt_mask = cv2.resize(gt_mask, depth_size[::-1]).astype(np.bool)
+            # img_name = '_'.join(map(str, ['bbox', camera_token]))
+            # gt_mask = gt_mask * 0.5 + np.array(img.resize(depth_size[::-1]))
+            # gt_mask = np.minimum(gt_mask, 255).astype(np.uint8)
+            # cv2.imwrite(f'{img_name}.jpg', gt_mask[..., ::-1])
+            # for i, box in enumerate(anns):
+            #     box = box.copy()
+            #     box_corners = view_points(box.corners(), world_to_sensor, normalize=False)
+            #     # [2, 8]
+            #     corners = view_points(box_corners, intrinsic.numpy(), normalize=True)[:2, :]
+            #     visible = (corners[0] > 0) & (corners[0] < img.width) & (corners[1] > 0) & (corners[1] < img.height) & (box_corners[2, :] > 1)
+            #     in_front = box_corners[2, :] > 0.1
+            #     if not (np.any(visible) and np.all(in_front)):
+            #         continue
+
+            #     box_list.append(anns[i])
+            # assert box_list == box_list_np, f'\n{[b.token for b in box_list]}\n{[b.token for b in box_list_np]}'
+            # view = intrinsic.numpy() @ (car_egopose_to_sensor @ world_to_car_egopose)[:-1]
+            # # # Show boxes.
+            # for box in box_list:
+            #     c = np.array(self.nusc.colormap[box.name]) / 255.0
+            #     box.render(ax, view=view, normalize=True, colors=(c,) * 3)
+
+            # # Limit visible range.
+            # ax.set_xlim(0, img.size[0])
+            # ax.set_ylim(img.size[1], 0)
+
+            # ax.axis('off')
+            # ax.set_aspect('equal')
+
+            # img_name = '_'.join(map(str, ['bbox', camera_token]))
+            # plt.savefig(f'{img_name}.jpg', bbox_inches='tight', pad_inches=0, dpi=200)
+
             images.append(normalised_img.unsqueeze(0).unsqueeze(0))
             intrinsics.append(intrinsic.unsqueeze(0).unsqueeze(0))
             extrinsics.append(sensor_to_lidar.unsqueeze(0).unsqueeze(0))
             depth_maps.append(depth_map.unsqueeze(0).unsqueeze(0))
+            gt_masks.append(torch.from_numpy(gt_mask).unsqueeze(0).unsqueeze(0))
 
-        images, intrinsics, extrinsics, depth_maps = (
+        images, intrinsics, extrinsics, depth_maps, gt_masks = (
             torch.cat(images, dim=1),
             torch.cat(intrinsics, dim=1),
             torch.cat(extrinsics, dim=1),
-            torch.cat(depth_maps, dim=1)
+            torch.cat(depth_maps, dim=1),
+            torch.cat(gt_masks, dim=1),
         )
 
-        return images, intrinsics, extrinsics, depth_maps
+        return images, intrinsics, extrinsics, depth_maps, gt_masks
 
     def _get_top_lidar_pose(self, rec):
         egopose = self.nusc.get('ego_pose',
@@ -559,7 +632,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
         """
         data = {}
-        keys = ['image', 'intrinsics', 'extrinsics', 'depth_map',
+        keys = ['image', 'intrinsics', 'extrinsics', 'depth_map', 'gt_mask',
                 'segmentation', 'instance', 'centerness', 'offset', 'flow', 'future_egomotion',
                 'sample_token',
                 'z_position', 'attribute',
@@ -575,7 +648,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         for i in range(1):
             rec = self.ixes[index]
 
-            images, intrinsics, extrinsics, depth_map = self.get_input_data(rec)
+            images, intrinsics, extrinsics, depth_map, gt_mask = self.get_input_data(rec)
             segmentation, instance, z_position, instance_map, attribute_label, anns_results = \
                 self.get_label(rec, instance_map)
 
@@ -591,6 +664,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             data['intrinsics'].append(intrinsics)
             data['extrinsics'].append(extrinsics)
             data['depth_map'].append(depth_map)
+            data['gt_mask'].append(gt_mask)
 
             data['segmentation'].append(segmentation)
             data['instance'].append(instance)
