@@ -336,25 +336,26 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
             # box_list = []
             world_to_sensor = car_egopose_to_sensor @ world_to_car_egopose
-            box_corners = np.concatenate([box.corners() for box in anns], axis=1)
-            box_corners = view_points(box_corners, world_to_sensor, normalize=False)
-            corners = view_points(box_corners, intrinsic.numpy(), normalize=True)[:2, :]
-            box_corners = box_corners.T.reshape(-1, 8, 3)  # .transpose(2, 1, 0)
-            corners = corners.T.reshape(-1, 8, 2)  # .transpose(2, 1, 0)
-            visible = (corners[..., 0] > 0) & (corners[..., 0] < img.width) & (corners[..., 1] > 0) & (corners[..., 1] < img.height) & (box_corners[..., 2] > 1)
-            # visible = (corners[0] > 0) & (corners[0] < img.width) & (corners[1] > 0) & (corners[1] < img.height) & (box_corners[2, :] > 1)
-
-            in_front = box_corners[..., 2] > 0.1
-            # box_list = anns[np.any(visible, axis=1) & np.all(in_front, axis=1)]
-
-            corners = corners[np.any(visible, axis=1) & np.all(in_front, axis=1)]
-            corners = np.clip(corners, 0, img.size)
-            xys = np.concatenate([np.min(corners, axis=1), np.max(corners, axis=1)], axis=1)
-
             gt_mask = np.zeros(img.size[::-1])
+            if len(anns) > 0:
+                box_corners = np.concatenate([box.corners() for box in anns], axis=1)
+                box_corners = view_points(box_corners, world_to_sensor, normalize=False)
+                corners = view_points(box_corners, intrinsic.numpy(), normalize=True)[:2, :]
+                box_corners = box_corners.T.reshape(-1, 8, 3)  # .transpose(2, 1, 0)
+                corners = corners.T.reshape(-1, 8, 2)  # .transpose(2, 1, 0)
+                visible = (corners[..., 0] > 0) & (corners[..., 0] < img.width) & (corners[..., 1] > 0) & (corners[..., 1] < img.height) & (box_corners[..., 2] > 1)
+                # visible = (corners[0] > 0) & (corners[0] < img.width) & (corners[1] > 0) & (corners[1] < img.height) & (box_corners[2, :] > 1)
+
+                in_front = box_corners[..., 2] > 0.1
+                # box_list = anns[np.any(visible, axis=1) & np.all(in_front, axis=1)]
+
+                corners = corners[np.any(visible, axis=1) & np.all(in_front, axis=1)]
+                corners = np.clip(corners, 0, img.size)
+                xys = np.concatenate([np.min(corners, axis=1), np.max(corners, axis=1)], axis=1)
+                for xy in xys:
+                    gt_mask = cv2.rectangle(gt_mask, tuple(xy[:2].astype(np.int)), tuple(xy[2:].astype(np.int)), 255, -1)
+
             # img_with_bbox = ImageDraw.Draw(img)
-            for xy in xys:
-                gt_mask = cv2.rectangle(gt_mask, tuple(xy[:2].astype(np.int)), tuple(xy[2:].astype(np.int)), 255, -1)
             gt_mask = cv2.resize(gt_mask, depth_size[::-1]).astype(np.bool)
             # img_name = '_'.join(map(str, ['bbox', camera_token]))
             # gt_mask = gt_mask * 0.5 + np.array(img.resize(depth_size[::-1]))
