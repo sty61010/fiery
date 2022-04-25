@@ -156,6 +156,8 @@ _C.LIFT.D_BOUND = [2.0, 50.0, 1.0]
 
 _C.MODEL = CN()
 
+_C.MODEL.FRUSTUM_TO_BEV = CN(new_allowed=True)
+
 _C.MODEL.BEV_ATTENTION = CN(new_allowed=True)
 
 _C.MODEL.IMAGE_ATTENTION = CN(new_allowed=True)

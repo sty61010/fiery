@@ -68,6 +68,10 @@ class Fiery(nn.Module):
         self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels, image_downstream_model=image_attention)
         # self.bev_conv = nn.Conv2d(self.cfg.IMAGE.N_CAMERA * self.cfg.MODEL.ENCODER.OUT_CHANNELS, self.cfg.MODEL.ENCODER.OUT_CHANNELS, kernel_size=1)
 
+        self.frustum_to_bev = build_obj(self.cfg.MODEL.FRUSTUM_TO_BEV)
+        if self.frustum_to_bev is not None:
+            print(f'Using frustum to bev: {type(self.frustum_to_bev).__name__}')
+
         self.bev_attention = build_obj(self.cfg.MODEL.BEV_ATTENTION)
         if self.bev_attention is not None:
             print(f'Using bev attention: {type(self.bev_attention).__name__}')
@@ -374,11 +378,14 @@ class Fiery(nn.Module):
         x = pack_sequence_dim(x)
         intrinsics = pack_sequence_dim(intrinsics)
         extrinsics = pack_sequence_dim(extrinsics)
-
-        geometry = self.get_geometry(intrinsics, extrinsics)
         encoder_output = self.encoder_forward(x)
         x = encoder_output.get('frustum')
-        x = self.projection_to_birds_eye_view(x, geometry)
+
+        if self.frustum_to_bev is not None:
+            x = self.frustum_to_bev(x, intrinsics, extrinsics)
+        else:
+            geometry = self.get_geometry(intrinsics, extrinsics)
+            x = self.projection_to_birds_eye_view(x, geometry)
         x = unpack_sequence_dim(x, b, s)
         encoder_output.update(dict(frustum=x))
         return encoder_output

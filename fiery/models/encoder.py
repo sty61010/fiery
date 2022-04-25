@@ -95,6 +95,12 @@ class Encoder(nn.Module):
         return x
 
     def forward(self, x):
+        """
+        Returns:
+            Dict contains following keys:
+                frustum: [B, num_cameras, D, H, W, C]
+                depth_map: [B, num_cameras, D, H, W]
+        """
         x = self.get_features(x)  # get feature vector
 
         x = self.depth_layer(x)  # feature and depth head

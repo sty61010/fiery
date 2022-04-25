@@ -101,7 +101,9 @@ class TrainingModule(pl.LightningModule):
             if self.cfg.PROBABILISTIC.ENABLED:
                 self.losses_fn['probabilistic'] = ProbabilisticLoss()
 
-        self.depth_loss = build_obj(self.cfg.LOSS.DEPTH_SUPERVISION) or build_loss(self.cfg.LOSS.DEPTH_SUPERVISION)
+        self.depth_loss = None
+        if self.cfg.LOSS.DEPTH_SUPERVISION.get('type', None) is not None:
+            self.depth_loss = build_obj(self.cfg.LOSS.DEPTH_SUPERVISION) or build_loss(self.cfg.LOSS.DEPTH_SUPERVISION)
         if self.depth_loss is not None:
             logging.info(f'Using depth loss: {type(self.depth_loss).__name__}')
             self.visualize_depth = {}

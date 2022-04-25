@@ -5,6 +5,7 @@ from fiery.losses import FocalLoss
 from self_attention_cv.bottleneck_transformer import BottleneckModule
 
 from fiery.layers.bev_self_attention import BEVSelfAttention
+from fiery.layers.frustum_to_bev import FrustumToBEV
 from fiery.models.encoder import ImageAttention
 from fiery.models.head_wrappers.Anchor3DHeadWrapper import Anchor3DHeadWrapper
 from fiery.models.head_wrappers.CenterHeadWrapper import CenterHeadWrapper
@@ -43,4 +44,5 @@ __all__ = [
     'CrossEntropyLoss',
     'ImageAttention',
     'FocalLoss',
+    'FrustumToBEV',
 ]
