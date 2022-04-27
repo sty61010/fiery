@@ -511,12 +511,13 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         dims = np.array([b.wlh for b in boxes]).reshape(-1, 3)  # [y_size, x_size, z_size]
 
         # Swap X, Y axis
-        locs[:, [1, 0]] = locs[:, [0, 1]]
+        # locs[:, [1, 0]] = locs[:, [0, 1]]
 
         rots = np.array([b.orientation.yaw_pitch_roll[0] for b in boxes]).reshape(-1, 1)
 
         # Revise Rotation angle for mirror line:  y = x
-        gt_bboxes_3d_list = [locs, dims, -rots + np.pi / 2]
+        # gt_bboxes_3d_list = [locs, dims, -rots + np.pi / 2]
+        gt_bboxes_3d_list = [locs, dims, rots]
 
         if self.cfg.DATASET.INCLUDE_VELOCITY:
             gt_bboxes_3d_list.append(np.zeros((len(boxes), 2)))

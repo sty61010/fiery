@@ -57,7 +57,7 @@ class Fiery(nn.Module):
 
         # Spatial extent in bird's-eye view, in meters
         self.spatial_extent = (self.cfg.LIFT.X_BOUND[1], self.cfg.LIFT.Y_BOUND[1])
-        self.bev_size = (self.bev_dimension[0].item(), self.bev_dimension[1].item())
+        self.bev_size = (self.bev_dimension[1].item(), self.bev_dimension[0].item())
 
         image_attention = build_obj(self.cfg.MODEL.IMAGE_ATTENTION)
         if image_attention is not None:
@@ -353,10 +353,10 @@ class Fiery(nn.Module):
         # Project to bird's-eye view by summing voxels.
         x_b, geometry_b, ranks = VoxelsSumming.apply(x_b, geometry_b, ranks)
         bev_feature = torch.zeros(
-            (batch, num_cameras, self.bev_dimension[0], self.bev_dimension[1], c),
+            (batch, num_cameras, self.bev_dimension[1], self.bev_dimension[0], c),
             device=x_b.device
         )
-        bev_feature[ranks // (num_cameras * num_bev_voxels), ranks // num_bev_voxels % num_cameras, geometry_b[..., 0], geometry_b[..., 1]] = x_b
+        bev_feature[ranks // (num_cameras * num_bev_voxels), ranks // num_bev_voxels % num_cameras, geometry_b[..., 1], geometry_b[..., 0]] = x_b
         # heatmap = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
         # geometry_b_np = geometry_b.detach().cpu().numpy()
         # heatmap[geometry_b_np[:, 0], geometry_b_np[:, 1]] = count.float().detach().cpu().numpy()
@@ -382,7 +382,7 @@ class Fiery(nn.Module):
         x = encoder_output.get('frustum')
 
         if self.frustum_to_bev is not None:
-            x = self.frustum_to_bev(x, intrinsics, extrinsics)
+            x = self.frustum_to_bev(x, intrinsics, extrinsics, self.cfg.IMAGE.FINAL_DIM)
         else:
             geometry = self.get_geometry(intrinsics, extrinsics)
             x = self.projection_to_birds_eye_view(x, geometry)

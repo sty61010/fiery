@@ -22,14 +22,14 @@ def output_to_nusc_box(detection, token, is_eval=False):
     labels = detection['labels_3d'].detach().cpu().numpy()
 
     box_gravity_center = box3d.gravity_center.detach().cpu().numpy()
-    if is_eval:
-        box_gravity_center = box_gravity_center[:, [1, 0, 2]]
+    # if is_eval:
+    #     box_gravity_center = box_gravity_center[:, [1, 0, 2]]
     box_dims = box3d.dims.detach().cpu().numpy()
     box_yaw = box3d.yaw.detach().cpu().numpy()
     # TODO: check whether this is necessary
     # with dir_offset & dir_limit in the head
-    if is_eval:
-        box_yaw = -box_yaw + np.pi / 2
+    # if is_eval:
+    #     box_yaw = -box_yaw + np.pi / 2
 
     box_list = []
     for i in range(len(box3d)):
