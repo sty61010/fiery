@@ -307,7 +307,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             # Combine all the transformation.
             # From sensor to lidar.
             lidar_to_sensor = car_egopose_to_sensor @ world_to_car_egopose @ lidar_to_world
-            sensor_to_lidar = torch.from_numpy(np.linalg.inv(lidar_to_sensor)).float()
+            # sensor_to_lidar = torch.from_numpy(np.linalg.inv(lidar_to_sensor)).float()
 
             # Load image
             image_filename = os.path.join(self.dataroot, camera_sample['filename'])
@@ -391,7 +391,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
             images.append(normalised_img.unsqueeze(0).unsqueeze(0))
             intrinsics.append(intrinsic.unsqueeze(0).unsqueeze(0))
-            extrinsics.append(sensor_to_lidar.unsqueeze(0).unsqueeze(0))
+            extrinsics.append(torch.from_numpy(lidar_to_sensor).float().unsqueeze(0).unsqueeze(0))
             depth_maps.append(depth_map.unsqueeze(0).unsqueeze(0))
             gt_masks.append(torch.from_numpy(gt_mask).unsqueeze(0).unsqueeze(0))
 
