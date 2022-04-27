@@ -1,4 +1,4 @@
-_BASE_: ["../single_timeframe.yml", "../models/centerpoint.yml", "../models/depth_supervision.yml"]
+_BASE_: ["../single_timeframe.yml", "../models/centerpoint.yml"]
 # _BASE_: ["../single_timeframe.yml", "../models/pointpillar.yml"]
 
 TAG: "lss"
@@ -54,3 +54,8 @@ OBJ:
 MODEL:
   ENCODER:
     DOWNSAMPLE: 8
+  FRUSTUM_TO_BEV:
+    type: FrustumToBEV
+    grid_size: [0.5, 0.5, 2]
+    pc_range: [-50.0, -50.0, -3.0, 50.0, 50.0, 5.0]
+    d_bound: [2.0, 50.0, 1.0]
