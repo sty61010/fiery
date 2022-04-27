@@ -88,6 +88,7 @@ def main():
 
     trainer = pl.Trainer(
         gpus=cfg.GPUS,
+        num_nodes=cfg.NODES,
         # you may want to set find_unused_parameters=True to avoid crashing
         strategy=DDPPlugin(find_unused_parameters=False),
         # strategy=DDPPlugin(find_unused_parameters=True),

@@ -106,6 +106,7 @@ _C.EVA_DIR = 'output_dir'
 _C.TAG = 'lss'
 
 _C.GPUS = [0]  # which gpus to use
+_C.NODES = 1
 _C.PRECISION = 32  # 16bit or 32bit
 _C.BATCHSIZE = 3
 _C.VAL_BATCHSIZE = 16
