@@ -1,12 +1,11 @@
 import torch
-from self_attention_cv import MultiHeadSelfAttention
 from torch import nn
 
 
 class BEVSelfAttention(nn.Module):
-    def __init__(self, num_cameras, dim):
+    def __init__(self, num_cameras, dim, num_heads=8):
         super().__init__()
-        self.attention_model = MultiHeadSelfAttention(dim=dim)
+        self.attention_model = nn.MultiheadAttention(dim, num_heads=num_heads)
         self.conv = nn.Conv2d(num_cameras * dim, dim, kernel_size=1)
 
     def forward(self, bev_maps: torch.Tensor):
@@ -20,7 +19,7 @@ class BEVSelfAttention(nn.Module):
         bev_maps = bev_maps.permute(0, 2, 3, 1, 4).flatten(0, 2)
 
         # print(f'bev_maps after reshape: {bev_maps.shape}')
-        output = self.attention_model(bev_maps)
+        output = self.attention_model(query=bev_maps, key=bev_maps, value=bev_maps)
 
         # print(f'output: {output.shape}')
         # [B*H*W, n, C] -> [B, n*C, H, W]

@@ -1,7 +1,6 @@
 from typing import Callable, Union
 import torch.nn as nn
 from efficientnet_pytorch import EfficientNet
-from self_attention_cv import MultiHeadSelfAttention
 
 from fiery.layers.convolutions import UpsamplingConcat
 
@@ -111,10 +110,10 @@ class Encoder(nn.Module):
 
 
 class ImageAttention(nn.Module):
-    def __init__(self, num_cameras, dim, num_layers=3):
+    def __init__(self, num_cameras, dim, num_layers=3, num_heads=8):
         super().__init__()
         self.num_cameras = num_cameras
-        layers = [MultiHeadSelfAttention(dim=dim) for _ in range(num_layers)]
+        layers = [nn.MultiheadAttention(dim, num_heads=num_heads) for _ in range(num_layers)]
         self.model = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -128,6 +127,6 @@ class ImageAttention(nn.Module):
         _, C, H, W = x.shape
 
         image_feature = x.view(-1, self.num_cameras, C, H, W).permute(0, 1, 4, 3, 2).reshape(-1, self.num_cameras * W, H * C)
-        image_feature = self.model(image_feature)
+        image_feature = self.model(query=image_feature, key=image_feature, value=image_feature)
         image_feature = image_feature.view(-1, self.num_cameras, W, H, C).permute(0, 1, 4, 3, 2).flatten(0, 1)
         return image_feature

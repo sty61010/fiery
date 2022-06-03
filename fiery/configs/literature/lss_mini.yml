@@ -1,4 +1,5 @@
-_BASE_: ["../single_timeframe.yml", "../models/centerpoint.yml", "../models/image_attention.yml"]
+# _BASE_: ["../temporal_single_timeframe.yml", "../models/centerpoint.yml"]
+_BASE_: ["../single_timeframe.yml", "../models/centerpoint.yml"]
 # _BASE_: ["../single_timeframe.yml", "../models/pointpillar.yml"]
 
 TAG: "lss"
@@ -7,10 +8,10 @@ EVA_DIR: "output_dir/lss_mini"
 # TEST_TRAINSET: True
 # EVALUATION: False
 
-GPUS: [0]
-EPOCHS: 25
-BATCHSIZE: 4
-VAL_BATCHSIZE: 6
+GPUS: [1]
+EPOCHS: 2
+BATCHSIZE: 2
+VAL_BATCHSIZE: 2
 N_WORKERS: 4
 VALID_FREQ: 1.0
 GRAD_NORM_CLIP: 10
@@ -39,18 +40,16 @@ LOSS:
 
 IMAGE:
   N_CAMERA: 6
-  FINAL_DIM: [256, 704]
-  RESIZE_SCALE: 0.44
-  TOP_CROP: 140
+  # FINAL_DIM: [256, 704]
+  # RESIZE_SCALE: 0.44
+  # TOP_CROP: 140
+  FINAL_DIM: [512, 1408]
+  RESIZE_SCALE: 0.88
+  TOP_CROP: 280
   IMAGE_AUG: False
 
-
 LOSS:
-  SEG_USE: True
+  SEG_USE: False
 
 OBJ:
   HEAD_NAME: "mm"
-
-MODEL:
-  ENCODER:
-    DOWNSAMPLE: 16

@@ -104,7 +104,8 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
         self.scenes = self.get_scenes()
         self.ixes = self.prepro()
-        self.indices = self.get_indices()
+        # self.indices = self.get_indices()
+        self.indices = self.get_mm_indices()
 
         # Image resizing and cropping
         self.augmentation_parameters = self.get_resizing_and_cropping_parameters()
@@ -154,7 +155,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
         # sort by scene, timestamp (only to make chronological viz easier)
         samples.sort(key=lambda x: (x['scene_token'], x['timestamp']))
-        print(len(samples))
+        print("samples: ", len(samples))
         return samples
 
     def get_indices(self):
@@ -180,6 +181,41 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
             if is_valid_data:
                 indices.append(current_indices)
+
+        return np.asarray(indices)
+
+    def get_mm_indices(self):
+        indices = []
+        for index in range(len(self.ixes)):
+            previous_rec = None
+            previous_id = None
+            current_indices = []
+            for t in range(self.sequence_length):
+                index_t = index - 2 * t
+                # Going over the dataset size limit.
+                if index_t >= len(self.ixes) or index_t < 0:
+                    if previous_id is not None:
+                        index_t = previous_id
+                    else:
+                        index_t = index
+
+                rec = self.ixes[index_t]
+
+                # Check if scene is the same
+                if (previous_rec is not None) and (rec['scene_token'] != previous_rec['scene_token']):
+                    current_indices.append(previous_id)
+                else:
+                    current_indices.append(index_t)
+
+                previous_rec = rec
+                previous_id = index_t
+
+            # reverse order of current_indices
+            current_indices.reverse()
+            # print("(current_indices): ", (current_indices))
+
+            # if is_valid_data:
+            indices.append(current_indices)
 
         return np.asarray(indices)
 
@@ -318,15 +354,16 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
     def _get_poly_region_in_image(self, instance_annotation, ego_translation, ego_rotation, token):
         box = Box(
-            instance_annotation['translation'],
-            instance_annotation['size'],
-            Quaternion(instance_annotation['rotation']),
+            center=instance_annotation['translation'],
+            size=instance_annotation['size'],
+            orientation=Quaternion(instance_annotation['rotation']),
             name=instance_annotation['category_name'],
+            velocity=self.nusc.box_velocity(instance_annotation['token']),
             token=token,
         )
         box.translate(ego_translation)
         box.rotate(ego_rotation)
-
+        # print("box vel:", box.velocity)
         pts = box.bottom_corners()[:2].T
         pts = np.round(
             (pts - self.bev_start_position[:2] + self.bev_resolution[:2] / 2.0) / self.bev_resolution[:2]).astype(np.int32)
@@ -374,6 +411,9 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             else:
                 instance_attribute = 0
 
+            # print("anno_toke vel: ", self.nusc.box_velocity(annotation_token)[:2])
+            # print("ins_anno['token']: ", self.nusc.box_velocity(annotation['token']))
+
             box, poly_region, z = self._get_poly_region_in_image(annotation,
                                                                  translation,
                                                                  rotation,
@@ -417,13 +457,22 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
         rots = np.array([b.orientation.yaw_pitch_roll[0] for b in boxes]).reshape(-1, 1)
 
+        # gt_velocity
+        vels = np.array([b.velocity[:2] for b in boxes]).reshape(-1, 2)
+        # print("vels: ", vels)
+
         # Revise Rotation angle for mirror line:  y = x
         gt_bboxes_3d_list = [locs, dims, -rots + np.pi / 2]
 
-        if self.cfg.DATASET.INCLUDE_VELOCITY:
-            gt_bboxes_3d_list.append(np.zeros((len(boxes), 2)))
+        # if self.cfg.DATASET.INCLUDE_VELOCITY:
+        #     gt_bboxes_3d_list.append(np.zeros((len(boxes), 2)))
 
         gt_bboxes_3d = np.concatenate(gt_bboxes_3d_list, axis=1)
+
+        if self.cfg.DATASET.INCLUDE_VELOCITY:
+            gt_bboxes_3d = np.concatenate([gt_bboxes_3d, vels], axis=-1)
+            
+        # print("gt_bboxes_3d: ", gt_bboxes_3d)
         gt_bboxes_3d = torch.from_numpy(gt_bboxes_3d).float()
 
         gt_bboxes_3d = LiDARInstance3DBoxes(
@@ -506,8 +555,8 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
         return future_egomotion.unsqueeze(0)
 
     def __len__(self):
-        # return len(self.indices)
-        return len(self.ixes)
+        return len(self.indices)
+        # return len(self.ixes)
 
     def __getitem__(self, index):
         """
@@ -540,23 +589,25 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
                 'sample_token',
                 'z_position', 'attribute',
                 'gt_bboxes_3d', 'gt_labels_3d', 'gt_names_3d', 'input_metas',
+                # 'index_t',
                 ]
         for key in keys:
             data[key] = []
 
         instance_map = {}
         # Loop over all the frames in the sequence.
-        # for index_t in self.indices[index]:
-        #     rec = self.ixes[index_t]
-        for i in range(1):
-            rec = self.ixes[index]
+        for index_t in self.indices[index]:
+            # print(index_t)
+            rec = self.ixes[index_t]
+        # for i in range(1):
+        #     rec = self.ixes[index]
 
             images, intrinsics, extrinsics = self.get_input_data(rec)
             segmentation, instance, z_position, instance_map, attribute_label, anns_results = \
                 self.get_label(rec, instance_map)
 
-            # future_egomotion = self.get_future_egomotion(rec, index_t)
-            future_egomotion = self.get_future_egomotion(rec, index)
+            future_egomotion = self.get_future_egomotion(rec, index_t)
+            # future_egomotion = self.get_future_egomotion(rec, index)
 
             data['gt_bboxes_3d'].append(anns_results['gt_bboxes_3d'])
             data['gt_labels_3d'].append(anns_results['gt_labels_3d'])
@@ -574,25 +625,27 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             data['z_position'].append(z_position)
             data['attribute'].append(attribute_label)
 
+            # data['index_t'].append(index_t)
+
         for key, value in data.items():
             if key in ['sample_token', 'centerness', 'offset', 'flow', 'gt_bboxes_3d', 'gt_labels_3d', 'gt_names_3d', 'input_metas', ]:
                 continue
             data[key] = torch.cat(value, dim=0)
 
         # If lyft need to subsample, and update future_egomotions
-        if self.cfg.MODEL.SUBSAMPLE:
-            for key, value in data.items():
-                if key in ['future_egomotion', 'sample_token', 'centerness', 'offset', 'flow']:
-                    continue
-                data[key] = data[key][::2].clone()
-            data['sample_token'] = data['sample_token'][::2]
+        # if self.cfg.MODEL.SUBSAMPLE:
+        #     for key, value in data.items():
+        #         if key in ['future_egomotion', 'sample_token', 'centerness', 'offset', 'flow']:
+        #             continue
+        #         data[key] = data[key][::2].clone()
+        #     data['sample_token'] = data['sample_token'][::2]
 
-            # Update future egomotions
-            future_egomotions_matrix = pose_vec2mat(data['future_egomotion'])
-            future_egomotion_accum = torch.zeros_like(future_egomotions_matrix)
-            future_egomotion_accum[:-1] = future_egomotions_matrix[:-1] @ future_egomotions_matrix[1:]
-            future_egomotion_accum = mat2pose_vec(future_egomotion_accum)
-            data['future_egomotion'] = future_egomotion_accum[::2].clone()
+        #     # Update future egomotions
+        #     future_egomotions_matrix = pose_vec2mat(data['future_egomotion'])
+        #     future_egomotion_accum = torch.zeros_like(future_egomotions_matrix)
+        #     future_egomotion_accum[:-1] = future_egomotions_matrix[:-1] @ future_egomotions_matrix[1:]
+        #     future_egomotion_accum = mat2pose_vec(future_egomotion_accum)
+        #     data['future_egomotion'] = future_egomotion_accum[::2].clone()
 
         instance_centerness, instance_offset, instance_flow = convert_instance_mask_to_center_and_offset_label(
             data['instance'], data['future_egomotion'],
@@ -620,13 +673,15 @@ class DeviceDict(dict):
 
 
 def collate_helper(elems, key):
-    if key in ['gt_bboxes_3d', 'gt_labels_3d', 'gt_names_3d', 'input_metas', ]:
+    if key in ['gt_bboxes_3d', 'gt_labels_3d', 'gt_names_3d', 'input_metas', 'sample_token', ]:
         return elems
     else:
         return torch.utils.data.dataloader.default_collate(elems)
 
 
 def mm_collact_fn(batch):
+    # print("batch: ", len(batch))
+    # print("batch[0]: ", batch[0])
     elem = batch[0]
     return DeviceDict({key: collate_helper([d[key] for d in batch], key) for key in elem})
 

@@ -1,7 +1,5 @@
 from importlib import import_module
 
-from self_attention_cv.bottleneck_transformer import BottleneckModule
-
 from fiery.layers.bev_self_attention import BEVSelfAttention
 from fiery.models.encoder import ImageAttention
 from fiery.models.head_wrappers.Anchor3DHeadWrapper import Anchor3DHeadWrapper
