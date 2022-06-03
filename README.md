@@ -29,7 +29,7 @@ This project is forked from https://github.com/wayveai/fiery.
 
 ## How to test the model
 
-Download the pretrained weight here and extract them into `tensorboard_logs`.
+Download the pretrained weight [here](https://drive.google.com/file/d/1yus5C8JHvcCW_A_9RynO6DZZphLmaHdA/view?usp=sharing) and extract them into `tensorboard_logs`.
 
 In the `fiery` directory, run
 
@@ -42,7 +42,7 @@ It will run evaluation on the trainval dataset and report the mAP score.
 Expected result:
 
 
-![image-20220603205905601](/home/andy94077/fiery/README.assets/image-20220603205905601.png)
+![image-20220603205905601](./README.assets/image-20220603205905601.png)
 
 ## How to train the model
 
