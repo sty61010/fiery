@@ -1,6 +1,8 @@
 import PIL
 import numpy as np
 import torch
+# import matplotlib.pyplot as plt
+# import seaborn as sns
 
 from pyquaternion import Quaternion
 
@@ -309,18 +311,23 @@ class VoxelsSumming(torch.autograd.Function):
         # Indicates the change of voxel.
         mask = torch.ones(x.shape[0], device=x.device, dtype=torch.bool)
         mask[:-1] = ranks[1:] != ranks[:-1]
+        # _, count = ranks.unique_consecutive(return_counts=True)
+        # print(f'count: {count.min()}, {count.max()}, {count.float().mean()}, {count.float().std()}')
+        # sns.histplot(count.detach().cpu().numpy(), binwidth=2, stat='probability')
+        # plt.savefig('hist.jpg', bbox_inches='tight')
 
-        x, geometry = x[mask], geometry[mask]
+        x, geometry, ranks = x[mask], geometry[mask], ranks[mask]
         # Calculate sum of features within a voxel.
         x = torch.cat((x[:1], x[1:] - x[:-1]))
 
         ctx.save_for_backward(mask)
         ctx.mark_non_differentiable(geometry)
+        ctx.mark_non_differentiable(ranks)
 
-        return x, geometry
+        return x, geometry, ranks
 
     @staticmethod
-    def backward(ctx, grad_x, grad_geometry):
+    def backward(ctx, grad_x, grad_geometry, grad_ranks):
         (mask,) = ctx.saved_tensors
         # Since the operation is summing, we simply need to send gradient
         # to all elements that were part of the summation process.

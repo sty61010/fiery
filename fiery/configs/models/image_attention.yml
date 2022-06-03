@@ -1,0 +1,9 @@
+MODEL:
+  IMAGE_ATTENTION:
+    # type: BottleneckModule
+    # in_channels: 64
+    # fmap_size: [32, 88]
+    # out_channels: 64
+    type: ImageAttention
+    num_cameras: 6
+    dim: 1024

@@ -1,11 +1,13 @@
+from typing import Callable, Union
 import torch.nn as nn
 from efficientnet_pytorch import EfficientNet
+from self_attention_cv import MultiHeadSelfAttention
 
 from fiery.layers.convolutions import UpsamplingConcat
 
 
 class Encoder(nn.Module):
-    def __init__(self, cfg, D):
+    def __init__(self, cfg, D, image_downstream_model: Union[None, Callable] = None):
         super().__init__()
         self.D = D
         self.C = cfg.OUT_CHANNELS
@@ -36,6 +38,7 @@ class Encoder(nn.Module):
             self.depth_layer = nn.Conv2d(upsampling_out_channels, self.C + self.D, kernel_size=1, padding=0)
         else:
             self.depth_layer = nn.Conv2d(upsampling_out_channels, self.C, kernel_size=1, padding=0)
+        self.image_downstream_model = image_downstream_model
 
     def delete_unused_layers(self):
         indices_to_delete = []
@@ -97,8 +100,34 @@ class Encoder(nn.Module):
 
         if self.use_depth_distribution:
             depth = x[:, : self.D].softmax(dim=1)
-            x = depth.unsqueeze(1) * x[:, self.D: (self.D + self.C)].unsqueeze(2)  # outer product depth and features
+            image_feature = x[:, self.D: (self.D + self.C)]
+            if self.image_downstream_model is not None:
+                image_feature = self.image_downstream_model(image_feature)
+            x = depth.unsqueeze(1) * image_feature.unsqueeze(2)  # outer product depth and features
         else:
             x = x.unsqueeze(2).repeat(1, 1, self.D, 1, 1)
 
         return x
+
+
+class ImageAttention(nn.Module):
+    def __init__(self, num_cameras, dim, num_layers=3):
+        super().__init__()
+        self.num_cameras = num_cameras
+        layers = [MultiHeadSelfAttention(dim=dim) for _ in range(num_layers)]
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x):
+        """
+        Args:
+            x: [N, C, H, W]
+
+        Returns:
+            image features: [N, C, H, W]
+        """
+        _, C, H, W = x.shape
+
+        image_feature = x.view(-1, self.num_cameras, C, H, W).permute(0, 1, 4, 3, 2).reshape(-1, self.num_cameras * W, H * C)
+        image_feature = self.model(image_feature)
+        image_feature = image_feature.view(-1, self.num_cameras, W, H, C).permute(0, 1, 4, 3, 2).flatten(0, 1)
+        return image_feature

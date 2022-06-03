@@ -1,3 +1,4 @@
+from typing import List, Union
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.dense_heads import CenterHead
 import torch
